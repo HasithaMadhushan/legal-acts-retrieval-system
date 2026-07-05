@@ -27,6 +27,11 @@ from app.services.reference_mapper import (
 from app.services.section_segmenter import segment_act_text
 from app.services.text_cleaner import clean_text, normalize_for_search
 
+# Sections/references an Admin has explicitly decided on are "locked": they and any
+# rows tied to them are frozen during reprocessing instead of being regenerated, so
+# verification work is never silently lost when an Act is reprocessed.
+_LOCKED_VERIFICATION_STATUSES = {VerificationStatus.VERIFIED, VerificationStatus.REJECTED}
+
 
 def process_act(db: Session, act: LegalAct, user: User) -> ProcessingJob:
     settings = get_settings()
@@ -107,44 +112,75 @@ def process_act(db: Session, act: LegalAct, user: User) -> ProcessingJob:
         job.progress_percent = 60
         segmentation = segment_act_text(cleaned_text)
         segmentation_summary = segmentation.summary
-        verified_section_count = (
-            db.query(ActSection)
-            .filter(
-                ActSection.act_id == act.id,
-                ActSection.verification_status == VerificationStatus.VERIFIED,
-            )
-            .count()
+
+        existing_sections = db.query(ActSection).filter(ActSection.act_id == act.id).all()
+        existing_references = (
+            db.query(LegalReference).filter(LegalReference.source_act_id == act.id).all()
         )
-        if verified_section_count:
+
+        locked_reference_ids = {
+            reference.id
+            for reference in existing_references
+            if reference.verification_status in _LOCKED_VERIFICATION_STATUSES
+        }
+        locked_section_ids = {
+            section.id
+            for section in existing_sections
+            if section.verification_status in _LOCKED_VERIFICATION_STATUSES
+        }
+        locked_section_ids.update(
+            reference.source_section_id
+            for reference in existing_references
+            if reference.id in locked_reference_ids and reference.source_section_id
+        )
+
+        preserved_sections = [
+            section for section in existing_sections if section.id in locked_section_ids
+        ]
+        preserved_section_keys = {
+            _section_key(section.section_number, section.section_path)
+            for section in preserved_sections
+        }
+
+        # A reference is preserved if it is itself locked, or if it lives on a
+        # preserved section (frozen sections keep every reference untouched so the
+        # section/reference pair never ends up in an inconsistent partial state).
+        references_to_delete_ids = [
+            reference.id
+            for reference in existing_references
+            if reference.id not in locked_reference_ids
+            and reference.source_section_id not in locked_section_ids
+        ]
+        sections_to_delete_ids = [
+            section.id for section in existing_sections if section.id not in locked_section_ids
+        ]
+        preserved_reference_count = len(existing_references) - len(references_to_delete_ids)
+
+        if references_to_delete_ids:
+            db.execute(delete(LegalReference).where(LegalReference.id.in_(references_to_delete_ids)))
+        if sections_to_delete_ids:
+            db.execute(delete(ActSection).where(ActSection.id.in_(sections_to_delete_ids)))
+        db.flush()
+
+        if preserved_sections:
             segmentation_warnings = segmentation_summary.get("warnings")
             if not isinstance(segmentation_warnings, list):
                 segmentation_warnings = []
             segmentation_warnings.append(
-                "Existing verified section records were replaced during reprocessing because "
-                "section extraction provenance is not tracked in the current MVP schema."
+                f"{len(preserved_sections)} verified/rejected section(s) were preserved and "
+                "excluded from reprocessing."
             )
             segmentation_summary["warnings"] = _unique_strings(
                 [warning for warning in segmentation_warnings if isinstance(warning, str)]
             )
-            segmentation_summary["verified_sections_replaced"] = verified_section_count
+            segmentation_summary["sections_preserved"] = len(preserved_sections)
         summary["segmentation"] = segmentation_summary
-
-        verified_reference_count = (
-            db.query(LegalReference)
-            .filter(
-                LegalReference.source_act_id == act.id,
-                LegalReference.verification_status == VerificationStatus.VERIFIED,
-            )
-            .count()
-        )
-
-        db.execute(delete(LegalReference).where(LegalReference.source_act_id == act.id))
-        db.execute(delete(ActSection).where(ActSection.act_id == act.id))
-        db.flush()
 
         section_drafts = segmentation.sections
         sections: list[ActSection] = []
         for draft in section_drafts:
+            if _section_key(draft.section_number, draft.section_path) in preserved_section_keys:
+                continue
             section = ActSection(
                 act_id=act.id,
                 section_number=draft.section_number,
@@ -194,18 +230,18 @@ def process_act(db: Session, act: LegalAct, user: User) -> ProcessingJob:
             mapping_results.append(result)
 
         reference_summary = summarize_references(reference_drafts)
-        if verified_reference_count:
+        if preserved_reference_count:
             reference_warnings = reference_summary.get("warnings")
             if not isinstance(reference_warnings, list):
                 reference_warnings = []
             reference_warnings.append(
-                "Existing verified references were replaced during reprocessing because "
-                "reference extraction provenance is not tracked in the current MVP schema."
+                f"{preserved_reference_count} reference(s) were preserved (verified/rejected, "
+                "or tied to a preserved section) and excluded from reprocessing."
             )
             reference_summary["warnings"] = _unique_strings(
                 [warning for warning in reference_warnings if isinstance(warning, str)]
             )
-            reference_summary["verified_references_replaced"] = verified_reference_count
+            reference_summary["references_preserved"] = preserved_reference_count
         summary["references"] = reference_summary
         summary["mapping"] = summarize_mapping(mapping_results)
 
@@ -218,7 +254,9 @@ def process_act(db: Session, act: LegalAct, user: User) -> ProcessingJob:
         summary.update(
             {
                 "sections_created": len(sections),
+                "sections_preserved": len(preserved_sections),
                 "references_created": len(references),
+                "references_preserved": preserved_reference_count,
                 "errors": [],
             }
         )
@@ -357,6 +395,10 @@ def _metadata_field_names() -> list[str]:
 
 def _date_string(value) -> str | None:
     return value.isoformat() if value else None
+
+
+def _section_key(section_number: str, section_path: str | None) -> tuple[str, str | None]:
+    return (section_number, section_path)
 
 
 def _unique_strings(values: list[str]) -> list[str]:

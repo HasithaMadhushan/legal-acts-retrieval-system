@@ -20,6 +20,9 @@ services:
       context: ./backend
     environment:
       DATABASE_URL: postgresql+psycopg://legal_acts:legal_acts@db:5432/legal_acts
+      ENVIRONMENT: development
+      # Local/dev only. Override SECRET_KEY with a unique value for any non-development
+      # environment; the app refuses to start if ENVIRONMENT=production with this default.
       SECRET_KEY: change-this-development-secret
       UPLOAD_DIR: /app/uploads
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000

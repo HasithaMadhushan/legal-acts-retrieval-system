@@ -5,6 +5,7 @@ import fitz
 from app.db.session import SessionLocal
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
+from app.models.legal_reference import LegalReference
 
 SAMPLE_ACT_TEXT = """TEST LEGAL ACT
 Act, No. 1 of 2024
@@ -55,6 +56,39 @@ def _replace_stored_path(act_id: str, stored_file_path: str) -> None:
 def _section_count(act_id: str) -> int:
     with SessionLocal() as db:
         return db.query(ActSection).filter(ActSection.act_id == act_id).count()
+
+
+def _section_rows(act_id: str) -> list[dict]:
+    with SessionLocal() as db:
+        sections = (
+            db.query(ActSection)
+            .filter(ActSection.act_id == act_id)
+            .order_by(ActSection.sort_order)
+            .all()
+        )
+        return [
+            {
+                "id": section.id,
+                "section_number": section.section_number,
+                "verification_status": section.verification_status,
+            }
+            for section in sections
+        ]
+
+
+def _reference_rows(act_id: str) -> list[dict]:
+    with SessionLocal() as db:
+        references = (
+            db.query(LegalReference).filter(LegalReference.source_act_id == act_id).all()
+        )
+        return [
+            {
+                "id": reference.id,
+                "source_section_id": reference.source_section_id,
+                "verification_status": reference.verification_status,
+            }
+            for reference in references
+        ]
 
 
 def test_admin_can_trigger_processing_for_valid_pdf(client, admin_token):
@@ -180,6 +214,84 @@ def test_failed_reprocessing_does_not_replace_existing_sections(client, admin_to
     assert second.status_code == 200
     assert second.json()["status"] == "FAILED"
     assert _section_count(act["id"]) == section_count
+
+
+def test_reprocessing_preserves_verified_section_and_its_references(client, admin_token):
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+    first = client.post(
+        f"/api/v1/acts/{act['id']}/process",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert first.status_code == 200
+    assert first.json()["status"] == "COMPLETED"
+
+    sections_before = _section_rows(act["id"])
+    references_before = _reference_rows(act["id"])
+    assert sections_before
+    assert references_before
+    verified_section_id = sections_before[0]["id"]
+    verified_reference_id = references_before[0]["id"]
+
+    verify_section_response = client.post(
+        f"/api/v1/sections/{verified_section_id}/verify",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert verify_section_response.status_code == 200
+    verify_reference_response = client.post(
+        f"/api/v1/references/{verified_reference_id}/verify",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert verify_reference_response.status_code == 200
+
+    second = client.post(
+        f"/api/v1/acts/{act['id']}/process",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert second.status_code == 200
+    job = second.json()
+    assert job["status"] == "COMPLETED"
+    summary = job["summary_json"]
+    assert summary["sections_preserved"] >= 1
+    assert summary["references_preserved"] >= 1
+
+    sections_after = {row["id"]: row for row in _section_rows(act["id"])}
+    references_after = {row["id"]: row for row in _reference_rows(act["id"])}
+
+    assert verified_section_id in sections_after
+    assert sections_after[verified_section_id]["verification_status"] == "VERIFIED"
+    assert verified_reference_id in references_after
+    assert references_after[verified_reference_id]["verification_status"] == "VERIFIED"
+    # The reference must still point at a section that actually exists.
+    preserved_reference_section_id = references_after[verified_reference_id]["source_section_id"]
+    assert preserved_reference_section_id in sections_after
+
+
+def test_reprocessing_preserves_rejected_section(client, admin_token):
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+    first = client.post(
+        f"/api/v1/acts/{act['id']}/process",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert first.status_code == 200
+
+    sections_before = _section_rows(act["id"])
+    rejected_section_id = sections_before[-1]["id"]
+    reject_response = client.post(
+        f"/api/v1/sections/{rejected_section_id}/reject",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert reject_response.status_code == 200
+
+    second = client.post(
+        f"/api/v1/acts/{act['id']}/process",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert second.status_code == 200
+    assert second.json()["status"] == "COMPLETED"
+
+    sections_after = {row["id"]: row for row in _section_rows(act["id"])}
+    assert rejected_section_id in sections_after
+    assert sections_after[rejected_section_id]["verification_status"] == "REJECTED"
 
 
 def test_admin_can_view_processing_jobs(client, admin_token):
