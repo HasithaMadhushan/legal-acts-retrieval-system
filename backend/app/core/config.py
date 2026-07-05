@@ -1,7 +1,10 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_DEV_SECRET_KEY = "change-this-development-secret"
 
 LEGAL_DISCLAIMER = (
     "This system is an academic research prototype for legal information retrieval support "
@@ -21,7 +24,7 @@ class Settings(BaseSettings):
     app_name: str = "Automated Legal Acts Retrieval System"
     environment: str = "development"
     database_url: str = "sqlite:///./legal_acts.db"
-    secret_key: str = "change-this-development-secret"
+    secret_key: str = DEFAULT_DEV_SECRET_KEY
     access_token_expire_minutes: int = 480
     upload_dir: str = "uploads"
     max_upload_size_mb: int = 50
@@ -32,6 +35,16 @@ class Settings(BaseSettings):
     doc_parser_primary: str = "docling"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @model_validator(mode="after")
+    def _guard_against_default_production_secret(self) -> "Settings":
+        is_production = self.environment.strip().lower() == "production"
+        if is_production and self.secret_key == DEFAULT_DEV_SECRET_KEY:
+            raise RuntimeError(
+                "Refusing to start with the default SECRET_KEY while ENVIRONMENT=production. "
+                "Set a unique SECRET_KEY via environment variable or .env file."
+            )
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -265,3 +265,32 @@ def test_saved_item_exports_include_disclaimer_and_research_fields(client, lawye
     assert "does not provide legal advice" in md_response.text
     assert "Mapped Target Act" in md_response.text
     assert "Export note" in md_response.text
+
+
+def test_csv_export_neutralizes_formula_injection_in_note(client, lawyer_token):
+    import csv
+    import io
+
+    fixture = _create_saved_item_fixture()
+    malicious_note = '=HYPERLINK("https://evil.example","click me")'
+    create = client.post(
+        "/api/v1/saved-items",
+        headers={"Authorization": f"Bearer {lawyer_token}"},
+        json={
+            "item_type": "REFERENCE",
+            "reference_id": fixture["reference_id"],
+            "note": malicious_note,
+        },
+    )
+    assert create.status_code == 201
+
+    csv_response = client.get(
+        "/api/v1/exports/saved-items.csv",
+        headers={"Authorization": f"Bearer {lawyer_token}"},
+    )
+
+    assert csv_response.status_code == 200
+    rows = list(csv.reader(io.StringIO(csv_response.text)))
+    note_cell = rows[-1][-1]
+    assert note_cell == f"'{malicious_note}"
+    assert not note_cell.startswith("=")
