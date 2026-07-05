@@ -1,10 +1,10 @@
-import logging
 from datetime import datetime
 
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.core.roles import ParserName, ProcessingJobStatus, ProcessingStatus, VerificationStatus
 from app.db.session import SessionLocal
 from app.models.act_section import ActSection
@@ -28,6 +28,8 @@ from app.services.reference_mapper import (
 )
 from app.services.section_segmenter import segment_act_text
 from app.services.text_cleaner import clean_text, normalize_for_search
+
+logger = get_logger(__name__)
 
 # Sections/references an Admin has explicitly decided on are "locked": they and any
 # rows tied to them are frozen during reprocessing instead of being regenerated, so
@@ -82,7 +84,7 @@ def run_processing_job(job_id: str) -> None:
     with SessionLocal() as db:
         job = db.get(ProcessingJob, job_id)
         if job is None:
-            logging.getLogger(__name__).error("Processing job %s was not found.", job_id)
+            logger.error("processing_job_not_found", job_id=job_id)
             return
         act = db.get(LegalAct, job.act_id)
         if act is None:
@@ -317,6 +319,13 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         job.summary_json = summary
         db.commit()
         db.refresh(job)
+        logger.info(
+            "processing_job_completed",
+            job_id=job.id,
+            act_id=act.id,
+            sections_created=summary["sections_created"],
+            references_created=summary["references_created"],
+        )
         return job
     except Exception as exc:
         db.rollback()
@@ -357,6 +366,12 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         failed_job.summary_json = summary
         db.commit()
         db.refresh(failed_job)
+        logger.warning(
+            "processing_job_failed",
+            job_id=failed_job.id,
+            act_id=failed_act.id,
+            error=error_message,
+        )
         return failed_job
 
 

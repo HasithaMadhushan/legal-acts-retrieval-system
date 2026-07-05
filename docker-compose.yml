@@ -26,6 +26,13 @@ services:
       SECRET_KEY: change-this-development-secret
       UPLOAD_DIR: /app/uploads
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      LOG_LEVEL: INFO
+      # "console" is human-friendly for local dev; use "json" in real deployments
+      # so log aggregators (e.g. CloudWatch, Loki) can parse each line.
+      LOG_FORMAT: console
+      # Optional: set SENTRY_DSN to enable error tracking. Left unset here since
+      # this is a local/dev compose file.
+      # SENTRY_DSN: ""
     ports:
       - "8000:8000"
     volumes:

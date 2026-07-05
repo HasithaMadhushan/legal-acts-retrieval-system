@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     # local dev keeps "just works" behavior; tests disable this and manage the
     # schema directly via Base.metadata for speed and per-test isolation.
     auto_migrate_on_startup: bool = True
+    log_level: str = "INFO"
+    # "console" gives human-friendly colored output for local dev; "json" emits
+    # one JSON object per line, suitable for ingestion by log aggregators.
+    log_format: str = "console"
+    # Error tracking (Sentry) is opt-in: leave unset to disable it entirely,
+    # which is the correct default for local dev and tests.
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = 0.0
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
