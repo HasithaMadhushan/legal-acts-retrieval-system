@@ -9,6 +9,17 @@ def test_health_reports_ok_when_all_checks_pass(client):
     assert data["checks"]["parser_configuration"]["ok"] is True
 
 
+def test_response_includes_request_id_header(client):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    request_id = response.headers.get("x-request-id")
+    assert request_id
+    # Should be a UUID4 string, e.g. 8-4-4-4-12 hex groups.
+    assert len(request_id) == 36
+    assert request_id.count("-") == 4
+
+
 def test_health_flags_unknown_parser_configuration(client, monkeypatch):
     from app.core.config import get_settings
 

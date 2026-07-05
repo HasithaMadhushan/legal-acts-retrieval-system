@@ -1,6 +1,9 @@
+import time
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+import structlog
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -19,9 +22,17 @@ from app.api.routes import (
     users,
 )
 from app.core.config import LEGAL_DISCLAIMER, get_settings
+from app.core.error_tracking import init_error_tracking
+from app.core.logging import configure_logging, get_logger
 from app.db.migrate import run_migrations
 from app.db.seed import seed_demo_users
 from app.db.session import SessionLocal, get_db
+
+configure_logging()
+init_error_tracking()
+
+logger = get_logger(__name__)
+access_logger = get_logger("app.request")
 
 
 @asynccontextmanager
@@ -30,6 +41,7 @@ async def lifespan(app: FastAPI):
         run_migrations()
     with SessionLocal() as db:
         seed_demo_users(db)
+    logger.info("app_startup_complete", environment=get_settings().environment)
     yield
 
 
@@ -43,6 +55,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    """Log every request with a request id, and expose it on the response.
+
+    Binding the request id (and method/path) via structlog's contextvars means
+    any log line emitted by route handlers or services while handling this
+    request automatically includes them, without threading a logger through
+    every function call.
+    """
+    request_id = str(uuid.uuid4())
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        request_id=request_id, method=request.method, path=request.url.path
+    )
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        access_logger.exception("request_failed", duration_ms=duration_ms)
+        raise
+
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    access_logger.info(
+        "request_completed", status_code=response.status_code, duration_ms=duration_ms
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.get("/health", tags=["health"])
