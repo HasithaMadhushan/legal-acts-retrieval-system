@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, use, useEffect, useState } from "react";
+import { FormEvent, use, useEffect, useRef, useState } from "react";
 import {
   getAct,
   getVerificationSummary,
@@ -23,6 +23,13 @@ interface MetadataForm {
   source_url: string;
   certification_date: string;
   publication_date: string;
+}
+
+const PROCESSING_POLL_INTERVAL_MS = 1500;
+const PROCESSING_POLL_MAX_ATTEMPTS = 80; // ~2 minutes
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function metadataFormFromAct(act: LegalAct): MetadataForm {
@@ -48,6 +55,14 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   async function load() {
     try {
@@ -69,21 +84,42 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
     load();
   }, [id]);
 
+  async function pollUntilFinished(jobId: string): Promise<ProcessingJob | null> {
+    for (let attempt = 0; attempt < PROCESSING_POLL_MAX_ATTEMPTS; attempt += 1) {
+      const jobList = await listProcessingJobs(id);
+      if (!isMountedRef.current) return null;
+      setJobs(jobList);
+      const job = jobList.find((item) => item.id === jobId) ?? null;
+      if (job && (job.status === "COMPLETED" || job.status === "FAILED")) {
+        return job;
+      }
+      await sleep(PROCESSING_POLL_INTERVAL_MS);
+      if (!isMountedRef.current) return null;
+    }
+    return null;
+  }
+
   async function runProcess() {
     setError("");
     setMessage("");
     setIsProcessing(true);
     try {
-      const job = await processAct(id);
+      // Processing runs in the background; the initial response is QUEUED, so
+      // poll for the job's final COMPLETED/FAILED state instead of trusting it.
+      const queuedJob = await processAct(id);
+      const finalJob = await pollUntilFinished(queuedJob.id);
+      if (!isMountedRef.current) return;
       await load();
-      if (job.status === "FAILED") {
-        setError(job.error_message ?? job.summary_json?.errors?.[0] ?? "Processing failed.");
+      if (!finalJob) {
+        setError("Processing is taking longer than expected. Refresh this page to check its status.");
+      } else if (finalJob.status === "FAILED") {
+        setError(finalJob.error_message ?? finalJob.summary_json?.errors?.[0] ?? "Processing failed.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Processing failed.");
       await load();
     } finally {
-      setIsProcessing(false);
+      if (isMountedRef.current) setIsProcessing(false);
     }
   }
 

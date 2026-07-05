@@ -2,7 +2,7 @@ import hashlib
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -22,7 +22,7 @@ from app.schemas.legal_act import (
     ProcessingJobRead,
     VerificationSummaryRead,
 )
-from app.services.document_processor import process_act
+from app.services.document_processor import create_processing_job, run_processing_job
 from app.services.text_cleaner import normalize_for_search
 
 router = APIRouter(prefix="/acts", tags=["acts"])
@@ -164,13 +164,23 @@ def delete_act(
 @router.post("/{act_id}/process", response_model=ProcessingJobRead)
 def process_uploaded_act(
     act_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ) -> ProcessingJob:
+    """Queue PDF processing for an Act and return immediately.
+
+    The actual extraction work (parsing, segmentation, reference extraction)
+    happens in a background task after this response is sent, since it can take
+    a while for large PDFs. Poll `GET /acts/{act_id}/processing-jobs` for
+    progress and the final COMPLETED/FAILED result.
+    """
     act = db.get(LegalAct, act_id)
     if not act:
         raise HTTPException(status_code=404, detail="Act not found.")
-    return process_act(db, act, current_user)
+    job = create_processing_job(db, act, current_user)
+    background_tasks.add_task(run_processing_job, job.id)
+    return job
 
 
 @router.get("/{act_id}/processing-jobs", response_model=list[ProcessingJobRead])

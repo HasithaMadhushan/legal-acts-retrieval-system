@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from sqlalchemy import delete
@@ -5,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.roles import ParserName, ProcessingJobStatus, ProcessingStatus, VerificationStatus
+from app.db.session import SessionLocal
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
@@ -34,9 +36,68 @@ _LOCKED_VERIFICATION_STATUSES = {VerificationStatus.VERIFIED, VerificationStatus
 
 
 def process_act(db: Session, act: LegalAct, user: User) -> ProcessingJob:
+    """Run processing synchronously to completion in the current session.
+
+    Kept for direct/script use. The `/acts/{id}/process` API route instead uses
+    `create_processing_job` + `run_processing_job` so the HTTP request can return
+    immediately while the actual extraction work runs as a background task.
+    """
+    job = create_processing_job(db, act, user)
+    return _execute_processing_job(db, job, act)
+
+
+def create_processing_job(db: Session, act: LegalAct, user: User) -> ProcessingJob:
+    """Create a QUEUED processing job and mark the Act as PROCESSING.
+
+    This is deliberately cheap (no PDF parsing) so it can run synchronously
+    inside a request handler; the actual work happens in `run_processing_job`.
+    """
+    job = ProcessingJob(
+        act_id=act.id,
+        status=ProcessingJobStatus.QUEUED,
+        current_step="Queued",
+        progress_percent=0,
+        created_by_user_id=user.id,
+        summary_json={
+            "previous_processing_status": act.processing_status.value,
+            "warnings": [],
+            "errors": [],
+        },
+    )
+    act.processing_status = ProcessingStatus.PROCESSING
+    act.processing_error = None
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def run_processing_job(job_id: str) -> None:
+    """Execute a previously-queued processing job in its own DB session.
+
+    Designed to be scheduled as a FastAPI `BackgroundTask`, which runs after the
+    HTTP response has already been sent, so it cannot reuse the request-scoped
+    session (which is closed by then).
+    """
+    with SessionLocal() as db:
+        job = db.get(ProcessingJob, job_id)
+        if job is None:
+            logging.getLogger(__name__).error("Processing job %s was not found.", job_id)
+            return
+        act = db.get(LegalAct, job.act_id)
+        if act is None:
+            job.status = ProcessingJobStatus.FAILED
+            job.error_message = "The Act associated with this job no longer exists."
+            job.completed_at = datetime.utcnow()
+            db.commit()
+            return
+        _execute_processing_job(db, job, act)
+
+
+def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> ProcessingJob:
     settings = get_settings()
     parser, parser_requested, selection_warnings = _select_parser(settings)
-    previous_processing_status = act.processing_status
+    previous_processing_status = _processing_status_from_job(job)
     summary: dict[str, object] = {
         "parser_requested": parser_requested,
         "parser_used": getattr(parser, "parser_name", ParserName.UNKNOWN.value),
@@ -47,18 +108,11 @@ def process_act(db: Session, act: LegalAct, user: User) -> ProcessingJob:
         "sections_created": 0,
         "references_created": 0,
     }
-    job = ProcessingJob(
-        act_id=act.id,
-        status=ProcessingJobStatus.RUNNING,
-        current_step="Starting processing",
-        progress_percent=5,
-        started_at=datetime.utcnow(),
-        created_by_user_id=user.id,
-        summary_json=summary,
-    )
-    act.processing_status = ProcessingStatus.PROCESSING
-    act.processing_error = None
-    db.add(job)
+    job.status = ProcessingJobStatus.RUNNING
+    job.current_step = "Starting processing"
+    job.progress_percent = 5
+    job.started_at = datetime.utcnow()
+    job.summary_json = summary
     db.commit()
     db.refresh(job)
     db.refresh(act)
@@ -328,6 +382,14 @@ def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:
         warnings.append(f"Unknown DOC_PARSER_PRIMARY={requested!r}; PyMuPDF was used.")
 
     return PyMuPdfParser(), requested or "pymupdf", warnings
+
+
+def _processing_status_from_job(job: ProcessingJob) -> ProcessingStatus:
+    raw_value = job.summary_json.get("previous_processing_status") if job.summary_json else None
+    try:
+        return ProcessingStatus(raw_value)
+    except ValueError:
+        return ProcessingStatus.UPLOADED
 
 
 def _parser_name(value: str) -> ParserName:

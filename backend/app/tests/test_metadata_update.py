@@ -5,6 +5,7 @@ import fitz
 from app.db.session import SessionLocal
 from app.models.legal_act import LegalAct
 from app.services.text_cleaner import normalize_for_search
+from app.tests.helpers import process_and_wait
 
 
 def _create_act() -> str:
@@ -123,12 +124,8 @@ def test_reprocessing_preserves_reviewed_metadata(client, admin_token):
         """
     )
     act = _upload_pdf(client, admin_token, initial_pdf)
-    first_process = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert first_process.status_code == 200
-    assert first_process.json()["status"] == "COMPLETED"
+    first_process = process_and_wait(client, admin_token, act["id"])
+    assert first_process["status"] == "COMPLETED"
 
     update = client.patch(
         f"/api/v1/acts/{act['id']}",
@@ -155,12 +152,7 @@ def test_reprocessing_preserves_reviewed_metadata(client, admin_token):
         assert act_row is not None
         Path(act_row.stored_file_path).write_bytes(replacement_pdf)
 
-    second_process = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert second_process.status_code == 200
-    job = second_process.json()
+    job = process_and_wait(client, admin_token, act["id"])
     assert job["status"] == "COMPLETED"
     assert "title" in job["summary_json"]["metadata"]["preserved_fields"]
     assert job["summary_json"]["metadata"]["extracted"]["act_number"] == "2"

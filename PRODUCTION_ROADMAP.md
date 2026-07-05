@@ -53,17 +53,19 @@ You asked me to recommend (target was undecided). For a solo/small-team legal-re
 
 ## 3. Production-readiness roadmap (phased)
 
-### Phase 1 — Correctness & legal-safety (must-do before any real users)
-- **F-001:** Preserve `VERIFIED` sections/references on reprocess (+ regression test). *This is the single most important fix.*
-- **F-002:** Refuse to boot in production with the default `SECRET_KEY`.
-- **F-003:** CSV formula-injection sanitizer on all exported cells.
-- Rotate all demo/secret values out of `docker-compose.yml` and `.env.example`.
+### Phase 1 — Correctness & legal-safety (must-do before any real users) — ✅ DONE (2026-07-05)
+- **F-001:** ✅ Preserve `VERIFIED` sections/references on reprocess (+ regression test). *This is the single most important fix.*
+- **F-002:** ✅ Refuse to boot in production with the default `SECRET_KEY`.
+- **F-003:** ✅ CSV formula-injection sanitizer on all exported cells.
+- ⬜ Rotate all demo/secret values out of `docker-compose.yml` and `.env.example`. *(not yet done — demo credentials are intentionally left in place per `AGENTS.md`, but production secrets must still be overridden before deploy.)*
 
-### Phase 2 — Reliability & operability
-- **F-007:** Background processing (BackgroundTasks → RQ/arq) using the existing `ProcessingJob` polling + retry/failure states.
-- **F-011:** Real `/health` (DB `SELECT 1`, upload/storage writable, parser config).
-- **F-012:** Alembic as the single source of truth; run `alembic upgrade head` on deploy; drop `create_all()` from app startup (keep for tests).
-- Add **structured logging** (`structlog`) and **error tracking** (`sentry-sdk`).
+### Phase 2 — Reliability & operability — ✅ mostly DONE (2026-07-05)
+- **F-007:** ✅ Background processing via FastAPI `BackgroundTasks`, using the existing `ProcessingJob` model for polling. (RQ/arq upgrade still recommended before multi-worker/horizontal scaling — see note below.)
+- **F-011:** ✅ Real `/health` (DB `SELECT 1`, upload/storage writable, parser config).
+- **F-012:** ✅ Alembic is now the single source of truth: a correct baseline migration replaces the two broken incremental ones, the app runs `alembic upgrade head` at startup, and the Docker image runs it explicitly before starting the server. `create_all()` is now test-only.
+- ⬜ Add **structured logging** (`structlog`) and **error tracking** (`sentry-sdk`). *(not yet done.)*
+
+> **Note on F-007:** `BackgroundTasks` runs the job in the same process/worker as the API. This is a correct, low-risk improvement over the previous fully-synchronous request (the HTTP call now returns immediately and the frontend polls `GET /acts/{id}/processing-jobs`), but it does **not** survive a process restart mid-job, and a very large PDF could still tie up a worker thread. Before running multiple Gunicorn/uvicorn workers in production (Phase 3), replace this with a real queue (RQ or arq + Redis) so jobs are durable and processing is decoupled from the web workers.
 
 ### Phase 3 — Deployment hardening
 - Run **gunicorn + uvicorn workers** (not bare uvicorn — current `backend/Dockerfile:13`).

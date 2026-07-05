@@ -22,6 +22,13 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
+    """Create all tables directly from the SQLAlchemy models.
+
+    Alembic (see `app.db.migrate.run_migrations`) is the source of truth for the
+    application's runtime schema. This helper exists for tests only, where
+    creating tables straight from the models is faster and simpler than running
+    migrations for every test's database reset.
+    """
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

@@ -6,6 +6,7 @@ from app.db.session import SessionLocal
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
+from app.tests.helpers import process_and_wait
 
 SAMPLE_ACT_TEXT = """TEST LEGAL ACT
 Act, No. 1 of 2024
@@ -43,6 +44,10 @@ def _upload_pdf(client, admin_token, content: bytes, filename: str = "act.pdf") 
     )
     assert response.status_code == 201
     return response.json()
+
+
+def _process_and_wait(client, admin_token, act_id: str) -> dict:
+    return process_and_wait(client, admin_token, act_id)
 
 
 def _replace_stored_path(act_id: str, stored_file_path: str) -> None:
@@ -94,13 +99,7 @@ def _reference_rows(act_id: str) -> list[dict]:
 def test_admin_can_trigger_processing_for_valid_pdf(client, admin_token):
     act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
 
-    response = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-
-    assert response.status_code == 200
-    job = response.json()
+    job = _process_and_wait(client, admin_token, act["id"])
     summary = job["summary_json"]
     assert job["status"] == "COMPLETED"
     assert summary["parser_requested"] == "pymupdf"
@@ -145,13 +144,7 @@ def test_missing_pdf_file_path_fails_safely(client, admin_token):
     act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
     _replace_stored_path(act["id"], str(Path("test_uploads") / "missing.pdf"))
 
-    response = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-
-    assert response.status_code == 200
-    job = response.json()
+    job = _process_and_wait(client, admin_token, act["id"])
     assert job["status"] == "FAILED"
     assert "could not be found" in job["error_message"]
     assert "could not be found" in job["summary_json"]["errors"][0]
@@ -160,13 +153,7 @@ def test_missing_pdf_file_path_fails_safely(client, admin_token):
 def test_corrupted_pdf_fails_gracefully(client, admin_token):
     act = _upload_pdf(client, admin_token, b"%PDF-1.4\nnot a valid pdf body\n")
 
-    response = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-
-    assert response.status_code == 200
-    job = response.json()
+    job = _process_and_wait(client, admin_token, act["id"])
     assert job["status"] == "FAILED"
     assert "corrupted" in job["error_message"]
     assert job["summary_json"]["parser_used"] == "PYMUPDF"
@@ -175,13 +162,7 @@ def test_corrupted_pdf_fails_gracefully(client, admin_token):
 def test_image_only_pdf_is_marked_ocr_required(client, admin_token):
     act = _upload_pdf(client, admin_token, _blank_pdf_bytes())
 
-    response = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-
-    assert response.status_code == 200
-    job = response.json()
+    job = _process_and_wait(client, admin_token, act["id"])
     summary = job["summary_json"]
     assert job["status"] == "FAILED"
     assert "OCR is disabled" in job["error_message"]
@@ -193,12 +174,8 @@ def test_image_only_pdf_is_marked_ocr_required(client, admin_token):
 
 def test_failed_reprocessing_does_not_replace_existing_sections(client, admin_token):
     act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
-    first = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert first.status_code == 200
-    assert first.json()["status"] == "COMPLETED"
+    first = _process_and_wait(client, admin_token, act["id"])
+    assert first["status"] == "COMPLETED"
     section_count = _section_count(act["id"])
     assert section_count > 0
 
@@ -207,23 +184,15 @@ def test_failed_reprocessing_does_not_replace_existing_sections(client, admin_to
         assert act_row is not None
         Path(act_row.stored_file_path).write_bytes(_blank_pdf_bytes())
 
-    second = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert second.status_code == 200
-    assert second.json()["status"] == "FAILED"
+    second = _process_and_wait(client, admin_token, act["id"])
+    assert second["status"] == "FAILED"
     assert _section_count(act["id"]) == section_count
 
 
 def test_reprocessing_preserves_verified_section_and_its_references(client, admin_token):
     act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
-    first = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert first.status_code == 200
-    assert first.json()["status"] == "COMPLETED"
+    first = _process_and_wait(client, admin_token, act["id"])
+    assert first["status"] == "COMPLETED"
 
     sections_before = _section_rows(act["id"])
     references_before = _reference_rows(act["id"])
@@ -243,12 +212,7 @@ def test_reprocessing_preserves_verified_section_and_its_references(client, admi
     )
     assert verify_reference_response.status_code == 200
 
-    second = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert second.status_code == 200
-    job = second.json()
+    job = _process_and_wait(client, admin_token, act["id"])
     assert job["status"] == "COMPLETED"
     summary = job["summary_json"]
     assert summary["sections_preserved"] >= 1
@@ -268,11 +232,7 @@ def test_reprocessing_preserves_verified_section_and_its_references(client, admi
 
 def test_reprocessing_preserves_rejected_section(client, admin_token):
     act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
-    first = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert first.status_code == 200
+    _process_and_wait(client, admin_token, act["id"])
 
     sections_before = _section_rows(act["id"])
     rejected_section_id = sections_before[-1]["id"]
@@ -282,12 +242,8 @@ def test_reprocessing_preserves_rejected_section(client, admin_token):
     )
     assert reject_response.status_code == 200
 
-    second = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert second.status_code == 200
-    assert second.json()["status"] == "COMPLETED"
+    second = _process_and_wait(client, admin_token, act["id"])
+    assert second["status"] == "COMPLETED"
 
     sections_after = {row["id"]: row for row in _section_rows(act["id"])}
     assert rejected_section_id in sections_after
@@ -296,11 +252,7 @@ def test_reprocessing_preserves_rejected_section(client, admin_token):
 
 def test_admin_can_view_processing_jobs(client, admin_token):
     act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
-    process_response = client.post(
-        f"/api/v1/acts/{act['id']}/process",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert process_response.status_code == 200
+    _process_and_wait(client, admin_token, act["id"])
 
     response = client.get(
         f"/api/v1/acts/{act['id']}/processing-jobs",
