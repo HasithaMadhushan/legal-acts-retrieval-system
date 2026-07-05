@@ -6,6 +6,9 @@ import structlog
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -24,9 +27,11 @@ from app.api.routes import (
 from app.core.config import LEGAL_DISCLAIMER, get_settings
 from app.core.error_tracking import init_error_tracking
 from app.core.logging import configure_logging, get_logger
+from app.core.rate_limit import limiter
 from app.db.migrate import run_migrations
 from app.db.seed import seed_demo_users
 from app.db.session import SessionLocal, get_db
+from app.services.storage import get_storage
 
 configure_logging()
 init_error_tracking()
@@ -47,6 +52,10 @@ async def lifespan(app: FastAPI):
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -114,15 +123,8 @@ def _check_database(db: Session) -> dict[str, object]:
 
 
 def _check_upload_directory() -> dict[str, object]:
-    try:
-        upload_path = settings.upload_path
-        upload_path.mkdir(parents=True, exist_ok=True)
-        probe_path = upload_path / ".health_check"
-        probe_path.write_text("ok", encoding="utf-8")
-        probe_path.unlink(missing_ok=True)
-        return {"ok": True}
-    except OSError as exc:
-        return {"ok": False, "error": str(exc)}
+    ok, error = get_storage().check_health()
+    return {"ok": ok, "error": error} if not ok else {"ok": True}
 
 
 def _check_parser_configuration() -> dict[str, object]:

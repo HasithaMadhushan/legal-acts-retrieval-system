@@ -5,8 +5,12 @@ services:
       POSTGRES_DB: legal_acts
       POSTGRES_USER: legal_acts
       POSTGRES_PASSWORD: legal_acts
+    # Bound to localhost only, here and below: this compose file is also used
+    # as the base for docker-compose.prod.yml, and services should never be
+    # reachable from outside the host directly -- only via a reverse proxy
+    # (see deploy/Caddyfile.example) or, for local dev, other host tooling.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -33,8 +37,10 @@ services:
       # Optional: set SENTRY_DSN to enable error tracking. Left unset here since
       # this is a local/dev compose file.
       # SENTRY_DSN: ""
+      # Gunicorn worker count (see backend/Dockerfile); 2 is plenty for local dev.
+      # WEB_CONCURRENCY: "2"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - backend_uploads:/app/uploads
     depends_on:
@@ -44,10 +50,13 @@ services:
   frontend:
     build:
       context: ./frontend
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000/api/v1
+      args:
+        # Baked into the client bundle at build time -- see frontend/Dockerfile.
+        # 127.0.0.1 is correct here because in local dev the browser and the
+        # backend are both reached via the host machine.
+        NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8000/api/v1
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - backend
 

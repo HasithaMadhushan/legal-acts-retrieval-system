@@ -23,6 +23,7 @@ from app.schemas.legal_act import (
     VerificationSummaryRead,
 )
 from app.services.document_processor import create_processing_job, run_processing_job
+from app.services.storage import get_storage
 from app.services.text_cleaner import normalize_for_search
 
 router = APIRouter(prefix="/acts", tags=["acts"])
@@ -85,10 +86,8 @@ def upload_act(
     if db.query(LegalAct).filter(LegalAct.file_sha256 == digest).first():
         raise HTTPException(status_code=409, detail="This PDF has already been uploaded.")
 
-    settings.upload_path.mkdir(parents=True, exist_ok=True)
     stored_name = f"{uuid4()}.pdf"
-    stored_path = settings.upload_path / stored_name
-    stored_path.write_bytes(content)
+    stored_key = get_storage().save(stored_name, content)
 
     title = source_name_safe.rsplit(".", 1)[0].replace("_", " ")
     act = LegalAct(
@@ -98,7 +97,7 @@ def upload_act(
         source_name=source_name,
         source_url=source_url,
         source_file_name=source_name_safe,
-        stored_file_path=str(stored_path),
+        stored_file_path=stored_key,
         file_size=len(content),
         mime_type=mime_type or "application/pdf",
         file_sha256=digest,

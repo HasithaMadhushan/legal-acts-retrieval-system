@@ -1,0 +1,72 @@
+# Production overlay for docker-compose.yml.
+#
+# Usage (from the repository root, on the target server):
+#   cp .env.example .env.prod   # then fill in real values, see below
+#   docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# This file only changes what genuinely differs between local dev and a real
+# deployment: secrets come from the environment instead of hardcoded
+# defaults, logs are JSON, containers restart on failure/reboot, and a Caddy
+# reverse proxy is added to terminate HTTPS and forward to the app services.
+# `docker-compose.yml` still supplies the images, volumes, and healthchecks.
+#
+# Required environment variables (export them or put them in the env file
+# passed via `--env-file`):
+#   SECRET_KEY                  unique secret, e.g. `openssl rand -hex 32` (never the dev default)
+#   POSTGRES_PASSWORD           unique database password
+#   CORS_ORIGINS                the real frontend origin(s), e.g. https://legal-acts.example.com
+#   NEXT_PUBLIC_API_BASE_URL    the public backend API base URL, e.g. https://legal-acts.example.com/api/v1
+#   PUBLIC_DOMAIN                the domain Caddy should request a TLS certificate for
+#
+# Optional:
+#   WEB_CONCURRENCY (default 4), SENTRY_DSN (default unset).
+#   S3_BUCKET (+ AWS_* creds) to store uploaded PDFs in S3/R2 instead of the
+#   backend_uploads volume -- required if you run more than one backend
+#   replica, since they don't share a filesystem otherwise.
+#
+# See `deploy/Caddyfile.example` for the reverse-proxy config and
+# `PRODUCTION_ROADMAP.md` Phase 3 for the rest of the deployment checklist
+# (managed Postgres backups, object storage for uploads, etc.).
+
+services:
+  db:
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the production env file}
+
+  backend:
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://legal_acts:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the production env file}@db:5432/legal_acts
+      ENVIRONMENT: production
+      SECRET_KEY: ${SECRET_KEY:?Set a unique SECRET_KEY in the production env file}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to the real frontend origin(s)}
+      LOG_FORMAT: json
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+
+  frontend:
+    build:
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?Set the public backend API base URL}
+    restart: unless-stopped
+
+  reverse-proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN to the domain Caddy should serve/get a cert for}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -45,6 +45,19 @@ class Settings(BaseSettings):
     # which is the correct default for local dev and tests.
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
+    # Per-client-IP throttle on /auth/* to slow down credential-stuffing/brute-force
+    # login attempts and mass account registration. Disabled only in tests, where
+    # fixtures log in dozens of times per second from a single "client" IP.
+    rate_limit_enabled: bool = True
+    auth_rate_limit: str = "20/minute"
+    # Object storage for uploaded PDFs. Leave unset (the default) to store
+    # files on local disk under UPLOAD_DIR -- correct for a single-instance
+    # deployment. Set S3_BUCKET to switch to S3 or an S3-compatible service
+    # (Cloudflare R2, MinIO, ...); credentials come from the standard AWS
+    # environment variables / instance role, not from app settings.
+    s3_bucket: str | None = None
+    s3_prefix: str = ""
+    s3_endpoint_url: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
