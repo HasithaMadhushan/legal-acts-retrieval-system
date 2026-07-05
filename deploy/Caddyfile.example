@@ -1,0 +1,32 @@
+# Example Caddy reverse-proxy config for a single-VPS production deployment.
+#
+# Setup:
+#   1. cp deploy/Caddyfile.example deploy/Caddyfile
+#   2. Point PUBLIC_DOMAIN's DNS A/AAAA record at this server.
+#   3. Make sure ports 80 and 443 are open on the host firewall (Caddy needs
+#      80 for the ACME HTTP-01 challenge as well as 443).
+#   4. Run with docker-compose.prod.yml (see the comment at the top of that
+#      file) -- Caddy then requests and renews a Let's Encrypt certificate for
+#      PUBLIC_DOMAIN automatically; no manual certbot/cron setup needed.
+#
+# Frontend (Next.js) serves the site itself; everything under /api/ and the
+# few top-level backend routes are forwarded to the FastAPI backend instead.
+{$PUBLIC_DOMAIN} {
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle /health {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+
+	encode gzip zstd
+	log {
+		output stdout
+		format json
+	}
+}

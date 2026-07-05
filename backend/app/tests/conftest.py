@@ -8,6 +8,9 @@ os.environ["DOCLING_ENABLED"] = "false"
 # Tests manage the schema directly via create_all (see init_db) for speed and
 # per-test isolation; Alembic migrations are exercised separately.
 os.environ["AUTO_MIGRATE_ON_STARTUP"] = "false"
+# Auth fixtures log in many times per test run from a single TestClient "IP";
+# the production rate limiter is exercised separately in test_rate_limit.py.
+os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import pytest
 from fastapi.testclient import TestClient

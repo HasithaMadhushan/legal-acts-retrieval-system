@@ -85,6 +85,13 @@ cd legal-acts-retrieval-system
 docker compose up --build
 ```
 
+### Production deployment
+
+`docker-compose.prod.yml` is a production overlay on top of the file above (unique
+secrets, JSON logs, `restart: unless-stopped`, and a Caddy reverse proxy for automatic
+HTTPS). See the comment header in that file and `deploy/Caddyfile.example` for setup, and
+`PRODUCTION_ROADMAP.md` (Phase 3) for the full deployment checklist.
+
 ## MVP Workflow
 
 1. Log in as Admin.

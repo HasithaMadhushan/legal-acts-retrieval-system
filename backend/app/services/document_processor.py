@@ -27,6 +27,7 @@ from app.services.reference_mapper import (
     summarize_mapping,
 )
 from app.services.section_segmenter import segment_act_text
+from app.services.storage import get_storage
 from app.services.text_cleaner import clean_text, normalize_for_search
 
 logger = get_logger(__name__)
@@ -124,7 +125,8 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         job.progress_percent = 20
         db.flush()
 
-        parsed = parser.extract(act.stored_file_path)
+        local_pdf_path = get_storage().ensure_local_path(act.stored_file_path)
+        parsed = parser.extract(str(local_pdf_path))
         raw_text = parsed.full_text
         cleaned_text = clean_text(raw_text)
         warnings = _unique_strings([*selection_warnings, *parsed.warnings])

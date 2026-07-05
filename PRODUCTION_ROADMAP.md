@@ -42,6 +42,7 @@ You asked me to recommend (target was undecided). For a solo/small-team legal-re
 ### Alternative A: Single VPS + Docker Compose + Nginx
 - One droplet (Hetzner/DigitalOcean), `docker compose` for backend/frontend/Postgres, Nginx (or Caddy) for TLS.
 - **Why/when:** cheapest, full control; but you own OS patching, backups, and TLS renewal. Good if institutional policy forbids managed cloud.
+- **This is now scaffolded:** `docker-compose.prod.yml` + `deploy/Caddyfile.example` implement exactly this (Caddy handles TLS/renewal automatically; you still own OS patching and DB backups on this path — see Phase 3).
 
 ### Alternative B: AWS (use the existing `infra/aws/`)
 - ECS Fargate or a single EC2, RDS Postgres, S3 uploads, Secrets Manager.
@@ -67,15 +68,17 @@ You asked me to recommend (target was undecided). For a solo/small-team legal-re
 
 > **Note on F-007:** `BackgroundTasks` runs the job in the same process/worker as the API. This is a correct, low-risk improvement over the previous fully-synchronous request (the HTTP call now returns immediately and the frontend polls `GET /acts/{id}/processing-jobs`), but it does **not** survive a process restart mid-job, and a very large PDF could still tie up a worker thread. Before running multiple Gunicorn/uvicorn workers in production (Phase 3), replace this with a real queue (RQ or arq + Redis) so jobs are durable and processing is decoupled from the web workers.
 
-### Phase 3 — Deployment hardening
-- Run **gunicorn + uvicorn workers** (not bare uvicorn — current `backend/Dockerfile:13`).
-- HTTPS via PaaS or reverse proxy (Nginx/Caddy).
-- **Secrets** via platform env/secret manager (never in compose).
-- **Automated daily DB backups** (managed Postgres gives this).
-- **Object storage** for uploads (S3/R2).
-- **F-008:** Rate limiting on `/auth/*`.
-- **F-006:** CI/CD (ruff + pytest + frontend typecheck/test/build; deploy on green).
-- Split `docker-compose.yml` into local vs. production overrides.
+### Phase 3 — Deployment hardening — ✅ DONE (2026-07-06)
+- **Gunicorn + uvicorn workers:** ✅ `backend/Dockerfile` runs `gunicorn -k uvicorn.workers.UvicornWorker` with `WEB_CONCURRENCY` workers (default 2) instead of bare uvicorn.
+- **HTTPS via reverse proxy:** ✅ `deploy/Caddyfile.example` + a `reverse-proxy` service in `docker-compose.prod.yml` terminate TLS (automatic Let's Encrypt via Caddy) and forward `/api/*` and `/health` to the backend, everything else to the frontend.
+- **Secrets via platform env:** ✅ `docker-compose.prod.yml` requires `SECRET_KEY`/`POSTGRES_PASSWORD`/`CORS_ORIGINS`/`NEXT_PUBLIC_API_BASE_URL`/`PUBLIC_DOMAIN` from the environment (`${VAR:?...}` fails fast if unset) instead of hardcoding them; `docker-compose.yml` also now binds all ports to `127.0.0.1` rather than `0.0.0.0`.
+- **Object storage for uploads:** ✅ `app/services/storage.py` introduces a `Storage` abstraction (`LocalStorage` default, optional `S3Storage`). Set `S3_BUCKET` to store PDFs in S3/R2/MinIO instead of the local volume; the PDF parsers keep working unchanged since the backend transparently caches a local copy for parsing.
+- **F-008:** ✅ Rate limiting on `/auth/register` and `/auth/login` (`slowapi`, per-client-IP, `AUTH_RATE_LIMIT` env var, disabled in tests).
+- **F-006:** ✅ CI/CD via `.github/workflows/ci.yml` (ruff + pytest; frontend typecheck/test/build) on every push/PR to `main`.
+- **Split `docker-compose.yml`:** ✅ `docker-compose.prod.yml` is a production overlay (secrets, `restart: unless-stopped`, JSON logs, reverse proxy) on top of the unchanged local-dev `docker-compose.yml`.
+- **Not yet done:** automated daily DB backups (use your managed Postgres provider's built-in backups, or `pg_dump` on a cron job, if self-hosting Postgres on the VPS in `docker-compose.prod.yml`).
+
+> **Note on rate limiting at scale:** the limiter's in-memory counters are per-Gunicorn-worker, so with `WEB_CONCURRENCY` workers the effective ceiling is roughly `AUTH_RATE_LIMIT * WEB_CONCURRENCY`, not an exact cross-process limit. Swap in a Redis-backed `limits` storage (`Limiter(storage_uri="redis://...")`) if/when this needs to be precise.
 
 ### Phase 4 — Search quality & accuracy
 - **F-004 / F-005:** Ranked Act-title mapping + per-section principal-enactment context.
@@ -107,7 +110,7 @@ You asked me to recommend (target was undecided). For a solo/small-team legal-re
 | `alembic` | **Keep** | Good — just make it the *only* migration path (F-012). |
 | `pytest` / `httpx` / `ruff` | **Keep** | Excellent standard toolchain. |
 
-**Recommended additions:** `slowapi` (rate limiting), `structlog` (logging), `sentry-sdk` (errors), `gunicorn` (prod server), `python-magic-bin`/`python-magic` (content sniffing), and later `pgvector` + an embeddings library (`sentence-transformers` or an API client).
+**Recommended additions:** ✅ `slowapi` (rate limiting), `structlog` (logging), `sentry-sdk` (errors), `gunicorn` (prod server), and `boto3` (optional S3/R2 uploads) are now in `requirements.txt` and wired in (Phases 2-3). Still not added: `python-magic-bin`/`python-magic` (content sniffing beyond the `%PDF-` signature check already in place), and later `pgvector` + an embeddings library (`sentence-transformers` or an API client) for Phase 5.
 
 ### Frontend (`frontend/package.json`) — lean; add a validation + graph layer
 
