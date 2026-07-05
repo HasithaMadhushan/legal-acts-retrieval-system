@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     docling_timeout_seconds: int = 60
     ocr_enabled: bool = False
     doc_parser_primary: str = "docling"
+    # Alembic is the schema source of truth. The app runs migrations at startup so
+    # local dev keeps "just works" behavior; tests disable this and manage the
+    # schema directly via Base.metadata for speed and per-test isolation.
+    auto_migrate_on_startup: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

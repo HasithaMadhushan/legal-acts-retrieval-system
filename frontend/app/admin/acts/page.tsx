@@ -8,9 +8,17 @@ import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
 
+const PROCESSING_POLL_INTERVAL_MS = 1500;
+const PROCESSING_POLL_MAX_ATTEMPTS = 80; // ~2 minutes
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default function AdminActsPage() {
   const [acts, setActs] = useState<LegalAct[]>([]);
   const [error, setError] = useState("");
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
 
   async function load() {
     try {
@@ -24,13 +32,33 @@ export default function AdminActsPage() {
     load();
   }, []);
 
+  async function pollActUntilFinished(id: string) {
+    for (let attempt = 0; attempt < PROCESSING_POLL_MAX_ATTEMPTS; attempt += 1) {
+      const updated = await listActs();
+      setActs(updated);
+      const act = updated.find((item) => item.id === id);
+      if (!act || act.processing_status !== "PROCESSING") return;
+      await sleep(PROCESSING_POLL_INTERVAL_MS);
+    }
+  }
+
   async function runProcess(id: string) {
     setError("");
+    setProcessingIds((prev) => new Set(prev).add(id));
     try {
+      // Processing runs in the background, so poll until the Act leaves the
+      // PROCESSING state instead of assuming it finished by the time the
+      // POST resolves.
       await processAct(id);
-      await load();
+      await pollActUntilFinished(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Processing failed.");
+    } finally {
+      setProcessingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       await load();
     }
   }
@@ -80,7 +108,9 @@ export default function AdminActsPage() {
                     <td><StatusBadge value={act.processing_status} /></td>
                     <td>
                       <div className="toolbar">
-                        <button onClick={() => runProcess(act.id)}>Process</button>
+                        <button onClick={() => runProcess(act.id)} disabled={processingIds.has(act.id)}>
+                          {processingIds.has(act.id) ? "Processing..." : "Process"}
+                        </button>
                         <Link className="button secondary" href={`/admin/acts/${act.id}/references`}>References</Link>
                       </div>
                     </td>

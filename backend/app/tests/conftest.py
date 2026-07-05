@@ -5,6 +5,9 @@ os.environ["SECRET_KEY"] = "test-secret"
 os.environ["UPLOAD_DIR"] = "test_uploads"
 os.environ["DOC_PARSER_PRIMARY"] = "pymupdf"
 os.environ["DOCLING_ENABLED"] = "false"
+# Tests manage the schema directly via create_all (see init_db) for speed and
+# per-test isolation; Alembic migrations are exercised separately.
+os.environ["AUTO_MIGRATE_ON_STARTUP"] = "false"
 
 import pytest
 from fastapi.testclient import TestClient
