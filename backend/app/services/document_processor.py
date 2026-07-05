@@ -1,0 +1,369 @@
+from datetime import datetime
+
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
+from app.core.roles import ParserName, ProcessingJobStatus, ProcessingStatus, VerificationStatus
+from app.models.act_section import ActSection
+from app.models.legal_act import LegalAct
+from app.models.legal_reference import LegalReference
+from app.models.processing_job import ProcessingJob
+from app.models.user import User
+from app.services.metadata_extractor import ExtractedMetadata, extract_metadata
+from app.services.pdf_parser.base import PdfExtractionError, PdfParser
+from app.services.pdf_parser.docling_parser import DoclingParser
+from app.services.pdf_parser.pymupdf_parser import PyMuPdfParser
+from app.services.reference_extractor import (
+    ReferenceDraft,
+    extract_references,
+    summarize_references,
+)
+from app.services.reference_mapper import (
+    build_mapping_context,
+    map_reference_with_result,
+    summarize_mapping,
+)
+from app.services.section_segmenter import segment_act_text
+from app.services.text_cleaner import clean_text, normalize_for_search
+
+
+def process_act(db: Session, act: LegalAct, user: User) -> ProcessingJob:
+    settings = get_settings()
+    parser, parser_requested, selection_warnings = _select_parser(settings)
+    previous_processing_status = act.processing_status
+    summary: dict[str, object] = {
+        "parser_requested": parser_requested,
+        "parser_used": getattr(parser, "parser_name", ParserName.UNKNOWN.value),
+        "page_count": None,
+        "extracted_character_count": 0,
+        "warnings": selection_warnings.copy(),
+        "errors": [],
+        "sections_created": 0,
+        "references_created": 0,
+    }
+    job = ProcessingJob(
+        act_id=act.id,
+        status=ProcessingJobStatus.RUNNING,
+        current_step="Starting processing",
+        progress_percent=5,
+        started_at=datetime.utcnow(),
+        created_by_user_id=user.id,
+        summary_json=summary,
+    )
+    act.processing_status = ProcessingStatus.PROCESSING
+    act.processing_error = None
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    db.refresh(act)
+
+    try:
+        job.current_step = "Extracting PDF text"
+        job.progress_percent = 20
+        db.flush()
+
+        parsed = parser.extract(act.stored_file_path)
+        raw_text = parsed.full_text
+        cleaned_text = clean_text(raw_text)
+        warnings = _unique_strings([*selection_warnings, *parsed.warnings])
+        extracted_character_count = len(cleaned_text)
+        summary.update(
+            {
+                "parser_used": parsed.parser_name,
+                "page_count": parsed.page_count,
+                "extracted_character_count": extracted_character_count,
+                "warnings": warnings,
+            }
+        )
+        if not cleaned_text.strip():
+            message = (
+                "No extractable text was found. The PDF may be scanned or image-only; "
+                "OCR is disabled for this MVP."
+            )
+            raise PdfExtractionError(
+                message,
+                parser_name=parsed.parser_name,
+                page_count=parsed.page_count,
+                extracted_character_count=extracted_character_count,
+                warnings=_unique_strings([*warnings, message]),
+            )
+
+        job.current_step = "Extracting metadata"
+        job.progress_percent = 40
+        metadata = extract_metadata(cleaned_text, act.source_file_name)
+        metadata_summary = _metadata_summary(metadata)
+        if previous_processing_status in {ProcessingStatus.PROCESSED, ProcessingStatus.VERIFIED}:
+            metadata_summary["preserved_fields"] = _metadata_field_names()
+        else:
+            metadata_summary["applied_fields"] = _apply_extracted_metadata(act, metadata)
+        summary["metadata"] = metadata_summary
+
+        act.page_count = parsed.page_count
+        act.raw_text = raw_text
+        act.parser_used = _parser_name(parsed.parser_name)
+
+        job.current_step = "Segmenting sections"
+        job.progress_percent = 60
+        segmentation = segment_act_text(cleaned_text)
+        segmentation_summary = segmentation.summary
+        verified_section_count = (
+            db.query(ActSection)
+            .filter(
+                ActSection.act_id == act.id,
+                ActSection.verification_status == VerificationStatus.VERIFIED,
+            )
+            .count()
+        )
+        if verified_section_count:
+            segmentation_warnings = segmentation_summary.get("warnings")
+            if not isinstance(segmentation_warnings, list):
+                segmentation_warnings = []
+            segmentation_warnings.append(
+                "Existing verified section records were replaced during reprocessing because "
+                "section extraction provenance is not tracked in the current MVP schema."
+            )
+            segmentation_summary["warnings"] = _unique_strings(
+                [warning for warning in segmentation_warnings if isinstance(warning, str)]
+            )
+            segmentation_summary["verified_sections_replaced"] = verified_section_count
+        summary["segmentation"] = segmentation_summary
+
+        verified_reference_count = (
+            db.query(LegalReference)
+            .filter(
+                LegalReference.source_act_id == act.id,
+                LegalReference.verification_status == VerificationStatus.VERIFIED,
+            )
+            .count()
+        )
+
+        db.execute(delete(LegalReference).where(LegalReference.source_act_id == act.id))
+        db.execute(delete(ActSection).where(ActSection.act_id == act.id))
+        db.flush()
+
+        section_drafts = segmentation.sections
+        sections: list[ActSection] = []
+        for draft in section_drafts:
+            section = ActSection(
+                act_id=act.id,
+                section_number=draft.section_number,
+                section_path=draft.section_path,
+                heading=draft.heading,
+                section_type=draft.section_type,
+                text=draft.text,
+                normalized_text=draft.normalized_text,
+                page_start=draft.page_start,
+                page_end=draft.page_end,
+                sort_order=draft.sort_order,
+                verification_status=VerificationStatus.PENDING,
+            )
+            db.add(section)
+            sections.append(section)
+        db.flush()
+
+        job.current_step = "Extracting and mapping references"
+        job.progress_percent = 80
+        reference_drafts: list[ReferenceDraft] = []
+        references: list[LegalReference] = []
+        for section in sections:
+            for draft in extract_references(section.text):
+                reference_drafts.append(draft)
+                reference = LegalReference(
+                    source_act_id=act.id,
+                    source_section_id=section.id,
+                    raw_reference_text=draft.raw_reference_text,
+                    context_snippet=draft.context_snippet,
+                    relationship_type=draft.relationship_type,
+                    target_act_title_raw=draft.target_act_title_raw,
+                    target_act_number=draft.target_act_number,
+                    target_act_year=draft.target_act_year,
+                    target_section_number=draft.target_section_number,
+                    target_section_path=draft.target_section_path,
+                    confidence_score=draft.confidence_score,
+                    extraction_method=draft.extraction_method,
+                    verification_status=draft.verification_status,
+                )
+                references.append(reference)
+
+        mapping_context = build_mapping_context(db, act, references)
+        mapping_results = []
+        for reference in references:
+            result = map_reference_with_result(db, reference, mapping_context)
+            db.add(result.reference)
+            mapping_results.append(result)
+
+        reference_summary = summarize_references(reference_drafts)
+        if verified_reference_count:
+            reference_warnings = reference_summary.get("warnings")
+            if not isinstance(reference_warnings, list):
+                reference_warnings = []
+            reference_warnings.append(
+                "Existing verified references were replaced during reprocessing because "
+                "reference extraction provenance is not tracked in the current MVP schema."
+            )
+            reference_summary["warnings"] = _unique_strings(
+                [warning for warning in reference_warnings if isinstance(warning, str)]
+            )
+            reference_summary["verified_references_replaced"] = verified_reference_count
+        summary["references"] = reference_summary
+        summary["mapping"] = summarize_mapping(mapping_results)
+
+        act.normalized_title = normalize_for_search(act.title)
+        act.processing_status = ProcessingStatus.PROCESSED
+        job.status = ProcessingJobStatus.COMPLETED
+        job.current_step = "Completed"
+        job.progress_percent = 100
+        job.completed_at = datetime.utcnow()
+        summary.update(
+            {
+                "sections_created": len(sections),
+                "references_created": len(references),
+                "errors": [],
+            }
+        )
+        job.summary_json = summary
+        db.commit()
+        db.refresh(job)
+        return job
+    except Exception as exc:
+        db.rollback()
+        error_message = str(exc) or "PDF processing failed."
+        if isinstance(exc, PdfExtractionError):
+            summary.update(
+                {
+                    "parser_used": exc.parser_name,
+                    "page_count": exc.page_count,
+                    "extracted_character_count": exc.extracted_character_count or 0,
+                    "warnings": _unique_strings(
+                        [*_as_string_list(summary.get("warnings")), *exc.warnings]
+                    ),
+                }
+            )
+        summary["errors"] = _unique_strings(
+            [*_as_string_list(summary.get("errors")), error_message]
+        )
+
+        failed_act = db.get(LegalAct, act.id)
+        failed_job = db.get(ProcessingJob, job.id)
+        if failed_act is None or failed_job is None:
+            raise
+
+        page_count = summary.get("page_count")
+        if isinstance(page_count, int):
+            failed_act.page_count = page_count
+        failed_act.parser_used = _parser_name(
+            str(summary.get("parser_used") or ParserName.UNKNOWN.value)
+        )
+        failed_act.processing_status = ProcessingStatus.FAILED
+        failed_act.processing_error = error_message
+        failed_job.status = ProcessingJobStatus.FAILED
+        failed_job.current_step = "Failed"
+        failed_job.progress_percent = 100
+        failed_job.completed_at = datetime.utcnow()
+        failed_job.error_message = error_message
+        failed_job.summary_json = summary
+        db.commit()
+        db.refresh(failed_job)
+        return failed_job
+
+
+def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:
+    requested = settings.doc_parser_primary.strip().lower()
+    warnings: list[str] = []
+
+    if requested == "docling":
+        if settings.docling_enabled:
+            return (
+                DoclingParser(timeout_seconds=settings.docling_timeout_seconds),
+                requested,
+                warnings,
+            )
+        warnings.append("Docling was requested, but DOCLING_ENABLED=false; PyMuPDF was used.")
+        return PyMuPdfParser(), requested, warnings
+
+    if requested == "ocr":
+        warnings.append("OCR parsing is not enabled for this MVP; PyMuPDF was used.")
+        return PyMuPdfParser(), requested, warnings
+
+    if requested not in {"", "pymupdf"}:
+        warnings.append(f"Unknown DOC_PARSER_PRIMARY={requested!r}; PyMuPDF was used.")
+
+    return PyMuPdfParser(), requested or "pymupdf", warnings
+
+
+def _parser_name(value: str) -> ParserName:
+    try:
+        return ParserName(value)
+    except ValueError:
+        return ParserName.UNKNOWN
+
+
+def _as_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _apply_extracted_metadata(act: LegalAct, metadata: ExtractedMetadata) -> list[str]:
+    act.title = metadata.title
+    act.normalized_title = metadata.normalized_title
+    act.act_number = metadata.act_number
+    act.year = metadata.year
+    act.certification_date = metadata.certification_date
+    act.publication_date = metadata.publication_date
+    return [
+        field
+        for field, value in {
+            "title": metadata.title,
+            "act_number": metadata.act_number,
+            "year": metadata.year,
+            "certification_date": metadata.certification_date,
+            "publication_date": metadata.publication_date,
+        }.items()
+        if value is not None
+    ]
+
+
+def _metadata_summary(metadata: ExtractedMetadata) -> dict[str, object]:
+    return {
+        "extracted": {
+            "title": metadata.title,
+            "normalized_title": metadata.normalized_title,
+            "act_number": metadata.act_number,
+            "year": metadata.year,
+            "certification_date": _date_string(metadata.certification_date),
+            "publication_date": _date_string(metadata.publication_date),
+        },
+        "confidence_score": metadata.confidence_score,
+        "warnings": metadata.warnings or [],
+        "applied_fields": [],
+        "preserved_fields": [],
+    }
+
+
+def _metadata_field_names() -> list[str]:
+    return [
+        "title",
+        "act_number",
+        "year",
+        "certification_date",
+        "publication_date",
+        "category",
+        "source_name",
+        "source_url",
+    ]
+
+
+def _date_string(value) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            unique.append(value)
+            seen.add(value)
+    return unique
