@@ -80,6 +80,8 @@ You asked me to recommend (target was undecided). For a solo/small-team legal-re
 
 > **Note on rate limiting at scale:** the limiter's in-memory counters are per-Gunicorn-worker, so with `WEB_CONCURRENCY` workers the effective ceiling is roughly `AUTH_RATE_LIMIT * WEB_CONCURRENCY`, not an exact cross-process limit. Swap in a Redis-backed `limits` storage (`Limiter(storage_uri="redis://...")`) if/when this needs to be precise.
 
+> **Phase 3 end-to-end verification (2026-07-06):** ran the real `docker compose build` + `docker compose up` stack (Postgres + multi-worker Gunicorn backend + Next.js frontend) end to end for the first time, which caught a real bug that unit tests couldn't: every Gunicorn worker's `lifespan` startup calls `seed_demo_users()` independently, and with `WEB_CONCURRENCY` &gt; 1 two workers can race to insert the same not-yet-existing demo user, crash on the unique-constraint violation, and take the whole app down (`Worker failed to boot` → master shutdown). Fixed in `app/db/seed.py` by catching `IntegrityError` on commit and treating it as "another worker already seeded this" (safe, since both workers insert identical data); regression tests in `app/tests/test_seed.py`. Re-verified after the fix: both workers boot cleanly, `/health` is green, demo login works, and the `/auth/login` rate limit correctly returns `429` after 20 requests/minute.
+
 ### Phase 4 — Search quality & accuracy
 - **F-004 / F-005:** Ranked Act-title mapping + per-section principal-enactment context.
 - **F-009 / F-010:** Sentence-bounded reference extraction, operative-verb requirements, Ordinance metadata; back these with a **seed gold dataset** + regression tests via the existing evaluation service.
