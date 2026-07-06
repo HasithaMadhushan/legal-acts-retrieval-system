@@ -1,4 +1,4 @@
-from sqlalchemy import String, cast, or_
+from sqlalchemy import String, cast, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.config import LEGAL_DISCLAIMER
@@ -105,17 +105,23 @@ class _SearchFilters:
 def _act_results(db: Session, filters: _SearchFilters, role: UserRole) -> list[SearchResult]:
     query = _apply_act_filters(db.query(LegalAct), filters, role)
     if filters.has_query:
-        query = query.filter(
-            or_(
-                LegalAct.normalized_title.ilike(filters.like),
-                LegalAct.act_number.ilike(filters.raw_like),
-                cast(LegalAct.year, String).ilike(filters.raw_like),
-                LegalAct.category.ilike(filters.raw_like),
-                LegalAct.source_name.ilike(filters.raw_like),
-                LegalAct.source_file_name.ilike(filters.raw_like),
-                LegalAct.raw_text.ilike(filters.raw_like),
-            )
-        )
+        conditions = [
+            LegalAct.normalized_title.ilike(filters.like),
+            LegalAct.act_number.ilike(filters.raw_like),
+            cast(LegalAct.year, String).ilike(filters.raw_like),
+            LegalAct.category.ilike(filters.raw_like),
+            LegalAct.source_name.ilike(filters.raw_like),
+            LegalAct.source_file_name.ilike(filters.raw_like),
+        ]
+        # `raw_text` can be hundreds of KB per Act; an unindexed ILIKE scan over
+        # it doesn't hold up in production. On Postgres, match it via the
+        # GIN-indexed `search_vector` column instead (see the F-013 migration);
+        # SQLite (tests/local dev) keeps the original ILIKE behavior.
+        if _is_postgres(db):
+            conditions.append(_fulltext_condition("legal_acts", filters.query))
+        else:
+            conditions.append(LegalAct.raw_text.ilike(filters.raw_like))
+        query = query.filter(or_(*conditions))
     results: list[SearchResult] = []
     for act in query.limit(250):
         results.append(
@@ -153,15 +159,17 @@ def _section_results(db: Session, filters: _SearchFilters, role: UserRole) -> li
     if filters.verification_status and role != UserRole.GENERAL_USER:
         query = query.filter(ActSection.verification_status == filters.verification_status)
     if filters.has_query:
-        query = query.filter(
-            or_(
-                ActSection.section_number == filters.query,
-                ActSection.section_path.ilike(filters.raw_like),
-                ActSection.heading.ilike(filters.raw_like),
-                ActSection.normalized_text.ilike(filters.like),
-                LegalAct.normalized_title.ilike(filters.like),
-            )
-        )
+        conditions = [
+            ActSection.section_number == filters.query,
+            ActSection.section_path.ilike(filters.raw_like),
+            ActSection.heading.ilike(filters.raw_like),
+            LegalAct.normalized_title.ilike(filters.like),
+        ]
+        if _is_postgres(db):
+            conditions.append(_fulltext_condition("act_sections", filters.query))
+        else:
+            conditions.append(ActSection.normalized_text.ilike(filters.like))
+        query = query.filter(or_(*conditions))
     results: list[SearchResult] = []
     for section in query.limit(500):
         results.append(
@@ -252,6 +260,22 @@ def _reference_results(db: Session, filters: _SearchFilters, role: UserRole) -> 
             )
         )
     return results
+
+
+def _is_postgres(db: Session) -> bool:
+    return db.get_bind().dialect.name == "postgresql"
+
+
+def _fulltext_condition(table: str, query: str):
+    """A Postgres full-text match against `{table}.search_vector` (F-013).
+
+    `search_vector` is a generated, GIN-indexed tsvector column added by the
+    `20260706_01_postgres_fulltext_search` migration -- Postgres-only, so
+    callers must guard this with `_is_postgres(db)` first.
+    """
+    return text(f"{table}.search_vector @@ plainto_tsquery('english', :fts_query)").bindparams(
+        fts_query=query
+    )
 
 
 def _apply_act_filters(query, filters: _SearchFilters, role: UserRole):

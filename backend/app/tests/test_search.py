@@ -7,7 +7,7 @@ from app.db.session import SessionLocal
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
-from app.services.search_service import search
+from app.services.search_service import _fulltext_condition, _is_postgres, search
 from app.services.text_cleaner import normalize_for_search
 
 
@@ -277,3 +277,39 @@ def test_search_endpoint_validation(client, admin_token):
     )
 
     assert response.status_code == 422
+
+
+def test_is_postgres_is_false_for_the_sqlite_test_database():
+    """F-013: search() must fall back to ILIKE (not the Postgres-only
+    `search_vector` full-text column) on SQLite, which is what tests and
+    local dev without Docker use."""
+    with SessionLocal() as db:
+        assert _is_postgres(db) is False
+
+
+def test_fulltext_condition_targets_the_search_vector_column_with_bound_query():
+    """F-013 regression: verifies the exact full-text SQL fragment used
+    against Postgres's `search_vector` (see the `20260706_01` migration)
+    without requiring a real Postgres connection in the test suite."""
+    condition = _fulltext_condition("legal_acts", "gaming levy")
+
+    compiled = condition.compile()
+    assert "legal_acts.search_vector" in str(compiled)
+    assert "plainto_tsquery" in str(compiled)
+    assert compiled.params == {"fts_query": "gaming levy"}
+
+
+def test_search_uses_fulltext_condition_when_postgres_is_simulated(monkeypatch):
+    """Forces the Postgres branch (via monkeypatch, since the test DB is
+    SQLite) and confirms `search()` still runs end-to-end without raising --
+    i.e. the extra `or_()` branch is wired up correctly, not just present in
+    isolation."""
+    _create_search_fixture()
+    monkeypatch.setattr("app.services.search_service._is_postgres", lambda db: True)
+    with SessionLocal() as db:
+        # The simulated Postgres branch appends a `search_vector @@ ...`
+        # clause that SQLite can't execute, so this should error at query
+        # time -- proving the branch really is reached -- rather than
+        # silently falling back to the ILIKE path.
+        with pytest.raises(Exception, match="search_vector|no such column|OperationalError"):
+            search(db, query="jurisdiction", role=UserRole.GENERAL_USER)

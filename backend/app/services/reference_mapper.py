@@ -1,3 +1,4 @@
+import difflib
 from dataclasses import dataclass, field
 
 from sqlalchemy import or_
@@ -33,6 +34,7 @@ class MappingResult:
     used_principal_context: bool = False
     confidence_band: str = "unresolved"
     warnings: list[str] = field(default_factory=list)
+    resolved_act: LegalAct | None = None
 
 
 def build_mapping_context(
@@ -52,6 +54,35 @@ def build_mapping_context(
 
 def map_reference(db: Session, reference: LegalReference) -> LegalReference:
     return map_reference_with_result(db, reference).reference
+
+
+def map_references(
+    db: Session, source_act: LegalAct, references: list[LegalReference]
+) -> list[MappingResult]:
+    """Map every reference extracted from `source_act`, tracking the
+    principal-enactment context sequentially in document order.
+
+    Fixes F-005: rather than picking one Act-wide "principal enactment" from
+    the first citation found anywhere in the document (wrong for omnibus
+    Acts that amend several different Acts in different sections), each bare
+    reference ("Section 5 thereof", "the principal enactment") uses the
+    closest PRECEDING explicit Act citation instead. `references` must
+    already be in document order (see `document_processor.py`, which builds
+    it by walking sections in `sort_order`).
+    """
+    context = MappingContext(source_act=source_act)
+    results: list[MappingResult] = []
+    for reference in references:
+        result = map_reference_with_result(db, reference, context)
+        results.append(result)
+        if (
+            result.resolved_act is not None
+            and not result.used_principal_context
+            and not _is_principal_enactment(reference.target_act_title_raw)
+        ):
+            context.principal_act = result.resolved_act
+            context.principal_source = reference.raw_reference_text
+    return results
 
 
 def map_reference_with_result(
@@ -98,6 +129,7 @@ def map_reference_with_result(
         used_principal_context=used_principal_context,
         confidence_band=confidence_band,
         warnings=_unique_strings(warnings),
+        resolved_act=target_act,
     )
 
 
@@ -186,13 +218,14 @@ def _find_target_act(
         if exact:
             return _TargetActResult(act=exact, match_kind="exact")
         if len(normalized_title) >= 4:
-            partial = (
+            candidates = (
                 db.query(LegalAct)
                 .filter(LegalAct.normalized_title.ilike(f"%{normalized_title}%"))
-                .first()
+                .all()
             )
-            if partial:
-                return _TargetActResult(act=partial, match_kind="partial")
+            ranked = _rank_partial_title_candidates(normalized_title, candidates)
+            if ranked:
+                return ranked
 
     chapter = normalize_chapter_reference(
         reference.target_act_title_raw
@@ -214,6 +247,43 @@ def _find_target_act(
             return _TargetActResult(act=chapter_match, match_kind="partial")
 
     return _TargetActResult()
+
+
+# Minimum similarity for a fuzzy title match to be trusted at all, and minimum lead
+# a top candidate needs over the runner-up to be trusted as unambiguous (F-004: the
+# previous `.first()` on an ILIKE query picked an arbitrary row with no regard for
+# match quality or competing candidates).
+_PARTIAL_TITLE_MIN_SCORE = 0.5
+_PARTIAL_TITLE_MIN_MARGIN = 0.15
+
+
+def _rank_partial_title_candidates(
+    normalized_title: str, candidates: list[LegalAct]
+) -> "_TargetActResult | None":
+    if not candidates:
+        return None
+    scored = sorted(
+        (
+            (
+                difflib.SequenceMatcher(None, normalized_title, candidate.normalized_title).ratio(),
+                candidate,
+            )
+            for candidate in candidates
+        ),
+        key=lambda pair: pair[0],
+        reverse=True,
+    )
+    best_score, best_candidate = scored[0]
+    if best_score < _PARTIAL_TITLE_MIN_SCORE:
+        return None
+    if len(scored) > 1 and (best_score - scored[1][0]) < _PARTIAL_TITLE_MIN_MARGIN:
+        return _TargetActResult(
+            warnings=[
+                "Multiple candidate Acts matched the referenced title with similar "
+                "confidence; needs manual review."
+            ]
+        )
+    return _TargetActResult(act=best_candidate, match_kind="partial")
 
 
 def _find_target_section(

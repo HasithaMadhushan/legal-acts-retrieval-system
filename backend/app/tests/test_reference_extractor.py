@@ -132,3 +132,64 @@ def test_weak_cross_reference_is_marked_for_review():
         VerificationStatus.PENDING,
         VerificationStatus.NEEDS_REVIEW,
     }
+
+
+def test_bare_section_mention_with_no_operative_verb_is_not_extracted():
+    """F-009 regression: a purely descriptive mention of a section number, with
+    no amendment/repeal/insert/cross-reference language nearby, is noise (it
+    doesn't identify which Act's section 12 is even meant) and should not
+    create a reference row at all."""
+    refs = extract_references(
+        "The Committee discussed several matters, including section 12, before adjourning."
+    )
+
+    assert refs == []
+
+
+def test_bare_subsection_and_item_mentions_without_operative_verb_are_dropped():
+    refs = extract_references(
+        "For illustration only, subsection (2) and item 5 are mentioned here as examples."
+    )
+
+    assert refs == []
+
+
+def test_sentence_boundary_prevents_borrowing_verb_from_adjacent_sentence():
+    """F-009 regression: a fixed-width context window used to bleed across
+    sentence boundaries, so a bare section mention in one sentence could pick
+    up an unrelated "is hereby amended" from a neighbouring sentence. With a
+    sentence-bounded window, a purely descriptive sentence gets no reference
+    even when the previous sentence contains real amendment language."""
+    refs = extract_references(
+        "Section 3 of the Judicature Act, No. 2 of 1978 is hereby amended. "
+        "For general context, section 12 is mentioned in the explanatory memorandum."
+    )
+
+    bare_section_12 = [ref for ref in refs if ref.raw_reference_text.lower() == "section 12"]
+    assert bare_section_12 == []
+
+
+def test_generic_pattern_does_not_duplicate_a_strong_pattern_match():
+    """F-009 regression: a bare "paragraph (d)"/"subsection (1)" match that
+    falls entirely inside an already-captured structured amendment (e.g. "by
+    the repeal of paragraph (d) of subsection (1)") is a redundant fragment
+    of the same sentence, not a second, independent reference."""
+    refs = extract_references(
+        "Section 9 of the Judicature Act, No. 2 of 1978 is hereby amended by the "
+        "repeal of paragraph (d) of subsection (1)."
+    )
+
+    bare_paragraph = [ref for ref in refs if ref.raw_reference_text.lower() == "paragraph (d)"]
+    bare_subsection = [ref for ref in refs if ref.raw_reference_text.lower() == "subsection (1)"]
+    assert bare_paragraph == []
+    assert bare_subsection == []
+    assert any(ref.relationship_type == RelationshipType.REPEALS for ref in refs)
+
+
+def test_chapter_and_schedule_mentions_remain_ungated():
+    """Chapter/Schedule mentions are identifying citations in their own right
+    (like an Act number), so -- unlike bare section/subsection/paragraph/item
+    numbers -- they should still be extracted without a nearby operative verb."""
+    refs = extract_references("Poisons, Opium and Dangerous Drugs Ordinance (Chapter 218)")
+
+    assert any(ref.target_act_title_raw == "Chapter 218" for ref in refs)

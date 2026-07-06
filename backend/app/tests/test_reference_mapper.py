@@ -8,6 +8,7 @@ from app.models.legal_reference import LegalReference
 from app.services.reference_mapper import (
     build_mapping_context,
     map_reference_with_result,
+    map_references,
     summarize_mapping,
 )
 from app.services.text_cleaner import normalize_for_search
@@ -203,6 +204,94 @@ def test_unresolved_reference_remains_unmapped_without_fake_target():
         assert reference.target_section_id is None
         assert reference.verification_status == VerificationStatus.NEEDS_REVIEW
         assert reference.confidence_score == 0.55
+
+
+def test_partial_title_match_picks_closest_candidate_regardless_of_insertion_order():
+    """F-004 regression: the old `.first()` on an ILIKE query returned whichever
+    row the DB happened to return first (commonly insertion order), with no
+    regard for match quality. Insert the *worse* match first to prove the new
+    ranking picks the better one on similarity, not insertion order."""
+    with SessionLocal() as db:
+        source = _act(db, "Amendment Act")
+        # Inserted first, but a much looser match against the reference text below.
+        loose_match = _act(
+            db,
+            "Betting and Gaming Levy Act of the Northern Province Extended Special Provisions",
+        )
+        # Inserted second, but near-identical to the reference text.
+        close_match = _act(db, "Betting and Gaming Levy Act A")
+        reference = _reference(source, target_act_title_raw="Betting and Gaming Levy Act")
+
+        result = map_reference_with_result(db, reference)
+
+        assert result.mapped_act is True
+        assert result.confidence_band == "partial"
+        assert reference.target_act_id == close_match.id
+        assert reference.target_act_id != loose_match.id
+
+
+def test_ambiguous_partial_title_matches_are_left_unresolved_for_review():
+    """F-004 regression: when two candidates match a fuzzy title with similar
+    confidence, guessing either one risks silently mapping to the wrong Act.
+    The mapper should flag this for manual review instead of picking one."""
+    with SessionLocal() as db:
+        source = _act(db, "Amendment Act")
+        _act(db, "Consumer Affairs Act Amendment Act")
+        _act(db, "National Consumer Affairs Act")
+        reference = _reference(source, target_act_title_raw="Consumer Affairs Act")
+
+        result = map_reference_with_result(db, reference)
+
+        assert result.mapped_act is False
+        assert reference.target_act_id is None
+        assert any("manual review" in warning for warning in result.warnings)
+
+
+def test_map_references_switches_principal_context_across_different_acts():
+    """F-005 regression: an omnibus Act that amends more than one target Act
+    should resolve each bare section reference against the *closest preceding*
+    explicit Act citation, not a single Act-wide guess from whichever citation
+    happened to appear first in the whole document."""
+    with SessionLocal() as db:
+        source = _act(db, "Omnibus Amendment Act", number="99", year=2026)
+        act_a = _act(db, "Inland Revenue Act", number="24", year=2017)
+        section_a = _section(db, act_a, "10", heading="Chargeable income")
+        act_b = _act(db, "Value Added Tax Act", number="14", year=2002)
+        section_b = _section(db, act_b, "5", heading="Rate of tax")
+
+        cite_a = _reference(
+            source,
+            raw_reference_text="Inland Revenue Act, No. 24 of 2017",
+            target_act_title_raw="Inland Revenue Act",
+            target_act_number="24",
+            target_act_year=2017,
+        )
+        bare_a = _reference(
+            source,
+            raw_reference_text="Section 10 thereof",
+            target_section_number="section 10",
+        )
+        cite_b = _reference(
+            source,
+            raw_reference_text="Value Added Tax Act, No. 14 of 2002",
+            target_act_title_raw="Value Added Tax Act",
+            target_act_number="14",
+            target_act_year=2002,
+        )
+        bare_b = _reference(
+            source,
+            raw_reference_text="Section 5 thereof",
+            target_section_number="section 5",
+        )
+
+        results = map_references(db, source, [cite_a, bare_a, cite_b, bare_b])
+
+        assert bare_a.target_act_id == act_a.id
+        assert bare_a.target_section_id == section_a.id
+        assert bare_b.target_act_id == act_b.id
+        assert bare_b.target_section_id == section_b.id
+        assert results[1].used_principal_context is True
+        assert results[3].used_principal_context is True
 
 
 def test_mapping_summary_counts_and_confidence_bands():
