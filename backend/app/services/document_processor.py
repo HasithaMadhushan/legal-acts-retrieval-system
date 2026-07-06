@@ -21,11 +21,7 @@ from app.services.reference_extractor import (
     extract_references,
     summarize_references,
 )
-from app.services.reference_mapper import (
-    build_mapping_context,
-    map_reference_with_result,
-    summarize_mapping,
-)
+from app.services.reference_mapper import map_references, summarize_mapping
 from app.services.section_segmenter import segment_act_text
 from app.services.storage import get_storage
 from app.services.text_cleaner import clean_text, normalize_for_search
@@ -280,12 +276,9 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
                 )
                 references.append(reference)
 
-        mapping_context = build_mapping_context(db, act, references)
-        mapping_results = []
-        for reference in references:
-            result = map_reference_with_result(db, reference, mapping_context)
+        mapping_results = map_references(db, act, references)
+        for result in mapping_results:
             db.add(result.reference)
-            mapping_results.append(result)
 
         reference_summary = summarize_references(reference_drafts)
         if preserved_reference_count:

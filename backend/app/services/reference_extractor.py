@@ -44,6 +44,11 @@ class ReferenceDraft:
 def extract_references(text: str) -> list[ReferenceDraft]:
     drafts: list[ReferenceDraft] = []
     seen: set[str] = set()
+    # Spans already captured by a specific, well-structured pattern (e.g. "Section 9
+    # of the X Act ... is hereby amended"). Generic bare-number patterns matching
+    # inside one of these spans are redundant fragments of the same statutory
+    # sentence, not a separate reference (F-009).
+    strong_spans: list[tuple[int, int]] = []
 
     def add(
         match: Match[str],
@@ -55,9 +60,22 @@ def extract_references(text: str) -> list[ReferenceDraft]:
         path=None,
         relationship_type: RelationshipType | None = None,
         raw: str | None = None,
+        is_strong: bool = False,
+        require_operative_signal: bool = False,
     ) -> None:
+        if not is_strong and any(
+            start <= match.start() and match.end() <= end for start, end in strong_spans
+        ):
+            return
+        # Sentence-bounded, not the wider fixed-width context: a fixed 160-char
+        # window can bleed into an adjacent, unrelated sentence and pick up a verb
+        # ("is hereby amended") that doesn't actually govern this match (F-009).
+        sentence = _sentence_context(text, match.start(), match.end())
+        needs_signal = require_operative_signal and not relationship_type
+        if needs_signal and not _has_operative_signal(sentence):
+            return
         context = _context(text, match.start(), match.end())
-        detected_relationship = relationship_type or classify_relationship(context)
+        detected_relationship = relationship_type or classify_relationship(sentence)
         confidence = score_reference(
             relationship_type=detected_relationship,
             has_act_number=bool(number and year),
@@ -70,6 +88,8 @@ def extract_references(text: str) -> list[ReferenceDraft]:
         if key in seen:
             return
         seen.add(key)
+        if is_strong:
+            strong_spans.append((match.start(), match.end()))
         drafts.append(
             ReferenceDraft(
                 raw_reference_text=raw_text,
@@ -98,6 +118,7 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             year=match.group("year"),
             path=chapter,
             relationship_type=RelationshipType.AMENDS,
+            is_strong=True,
         )
 
     for match in SECTION_OF_ACT_AMENDED_RE.finditer(text):
@@ -109,6 +130,7 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             section=match.group("section"),
             path=match.group("section"),
             relationship_type=RelationshipType.AMENDS,
+            is_strong=True,
         )
 
     for match in PRINCIPAL_SECTION_AMENDED_RE.finditer(text):
@@ -118,6 +140,7 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             section=match.group("section"),
             path=match.group("section"),
             relationship_type=RelationshipType.AMENDS,
+            is_strong=True,
         )
 
     for match in NEW_SECTION_INSERT_RE.finditer(text):
@@ -127,6 +150,7 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             section=match.group("section"),
             path=path,
             relationship_type=RelationshipType.INSERTS,
+            is_strong=True,
         )
 
     for match in EFFECT_AS_SECTION_RE.finditer(text):
@@ -135,6 +159,7 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             section=match.group("section"),
             path=match.group("section"),
             relationship_type=RelationshipType.INSERTS,
+            is_strong=True,
         )
 
     for match in REPEAL_PARAGRAPH_RE.finditer(text):
@@ -144,10 +169,11 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             section=f"({match.group('paragraph')})",
             path=path,
             relationship_type=RelationshipType.REPEALS,
+            is_strong=True,
         )
 
     for match in SUBSTITUTION_RE.finditer(text):
-        add(match, relationship_type=RelationshipType.SUBSTITUTES)
+        add(match, relationship_type=RelationshipType.SUBSTITUTES, is_strong=True)
 
     for match in ADDITION_RE.finditer(text):
         target = match.group("target")
@@ -157,6 +183,7 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             section=target,
             path=f"{target_type} {target}",
             relationship_type=RelationshipType.ADDS,
+            is_strong=True,
         )
 
     for match in NEW_PARAGRAPH_ITEM_RE.finditer(text):
@@ -164,6 +191,7 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             match,
             path=f"new {match.group('target_type').lower()}",
             relationship_type=RelationshipType.ADDS,
+            is_strong=True,
         )
 
     for match in SCHEDULE_AMENDMENT_RE.finditer(text):
@@ -172,6 +200,7 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             title="principal enactment",
             path=match.group("schedule").strip(),
             relationship_type=RelationshipType.AMENDS,
+            is_strong=True,
         )
 
     for match in ACT_CITATION_RE.finditer(text):
@@ -180,22 +209,42 @@ def extract_references(text: str) -> list[ReferenceDraft]:
             title=f"{match.group('title')} Act",
             number=match.group("number"),
             year=match.group("year"),
+            is_strong=True,
         )
 
+    # From here on, patterns match a bare structural number ("section 9",
+    # "item 3", ...) with no Act name attached, which is ambiguous on its own
+    # (it could be the source Act's own numbering, not a cross-reference at
+    # all). Require some operative/relationship language in the same sentence
+    # before creating a reference for these, to cut down on false positives
+    # from purely descriptive mentions (F-009).
     for match in SECTION_RE.finditer(text):
-        add(match, section=match.group("section"), path=match.group("section"))
+        add(
+            match,
+            section=match.group("section"),
+            path=match.group("section"),
+            require_operative_signal=True,
+        )
 
     for match in SUBSECTION_RE.finditer(text):
         subsection = f"({match.group('subsection')})"
-        add(match, section=subsection, path=subsection)
+        add(match, section=subsection, path=subsection, require_operative_signal=True)
 
     for match in PARAGRAPH_RE.finditer(text):
         paragraph = f"({match.group('paragraph')})"
-        add(match, section=paragraph, path=paragraph)
+        add(match, section=paragraph, path=paragraph, require_operative_signal=True)
 
     for match in ITEM_RE.finditer(text):
-        add(match, section=match.group("item"), path=f"item {match.group('item')}")
+        add(
+            match,
+            section=match.group("item"),
+            path=f"item {match.group('item')}",
+            require_operative_signal=True,
+        )
 
+    # Chapter/Schedule mentions are kept ungated: unlike a bare section number,
+    # "Chapter 218" or "the Second Schedule" is itself an identifying citation
+    # (akin to an Act number) even without a nearby amendment verb.
     for match in SCHEDULE_RE.finditer(text):
         add(match, path=match.group("schedule").strip())
 
@@ -262,6 +311,35 @@ def score_reference(
 def _context(text: str, start: int, end: int, width: int = 160) -> str:
     snippet = text[max(0, start - width) : min(len(text), end + width)]
     return " ".join(snippet.split())
+
+
+_ALL_RELATIONSHIP_PHRASES = tuple(
+    phrase for phrases in RELATIONSHIP_PHRASES.values() for phrase in phrases
+)
+
+
+def _sentence_context(text: str, start: int, end: int) -> str:
+    """Return the text of the sentence/clause containing `text[start:end]`.
+
+    Bounded by the nearest '.', ';', or newline on either side (or the string
+    boundaries), rather than a fixed character width, so relationship
+    classification isn't influenced by an adjacent, unrelated sentence
+    (F-009).
+    """
+    left_bound = max(
+        text.rfind(".", 0, start), text.rfind(";", 0, start), text.rfind("\n", 0, start)
+    )
+    span_start = left_bound + 1 if left_bound != -1 else 0
+    right_positions = [
+        pos for pos in (text.find(".", end), text.find(";", end), text.find("\n", end)) if pos != -1
+    ]
+    span_end = min(right_positions) + 1 if right_positions else len(text)
+    return " ".join(text[span_start:span_end].split())
+
+
+def _has_operative_signal(sentence: str) -> bool:
+    lowered = sentence.lower()
+    return any(phrase in lowered for phrase in _ALL_RELATIONSHIP_PHRASES)
 
 
 def normalized_reference_key(raw: str) -> str:

@@ -25,6 +25,16 @@ TITLE_NOISE_RE = re.compile(
     r")\b",
     re.I,
 )
+# Sri Lankan enactments are titled either "... Act" (post-independence) or "...
+# Ordinance" (colonial-era, still in force and still amended today, e.g. the
+# Poisons, Opium and Dangerous Drugs Ordinance). Both must be recognized as a
+# legal-act-shaped title, not just "Act" (F-010).
+TITLE_DESIGNATOR_RE = re.compile(r"\b(act|ordinance)\b", re.I)
+# How far into the document to look for the Act/Ordinance number, year, and
+# certification/publication dates. Some Acts have a longer preamble (multi-page
+# gazette header, long titles, etc.) that pushes this metadata past the first
+# ~4000 characters (F-010).
+METADATA_SCAN_WINDOW = 8000
 
 
 @dataclass
@@ -41,7 +51,8 @@ class ExtractedMetadata:
 
 def extract_metadata(text: str, fallback_title: str) -> ExtractedMetadata:
     first_lines = [line.strip() for line in text.splitlines()[:40] if line.strip()]
-    act_match = ACT_NUMBER_RE.search(text[:4000])
+    scan_window = text[:METADATA_SCAN_WINDOW]
+    act_match = ACT_NUMBER_RE.search(scan_window)
     warnings: list[str] = []
 
     title, title_confidence = _extract_title(first_lines, fallback_title)
@@ -51,8 +62,8 @@ def extract_metadata(text: str, fallback_title: str) -> ExtractedMetadata:
     if not act_match:
         warnings.append("Act number and year were not detected near the beginning of the text.")
 
-    certification_date = _find_date(text[:4000], CERTIFIED_RES)
-    publication_date = _find_date(text[:4000], PUBLICATION_RES)
+    certification_date = _find_date(scan_window, CERTIFIED_RES)
+    publication_date = _find_date(scan_window, PUBLICATION_RES)
     confidence_score = _metadata_confidence(
         title_confidence=title_confidence,
         has_act_number=bool(act_match),
@@ -83,7 +94,7 @@ def _extract_title(first_lines: list[str], fallback_title: str) -> tuple[str, fl
                 return _clean_title(previous_title), 0.85
 
     for line in first_lines[:20]:
-        if "act" in line.lower() and not TITLE_NOISE_RE.search(line):
+        if TITLE_DESIGNATOR_RE.search(line) and not TITLE_NOISE_RE.search(line):
             title = _remove_act_number(line)
             if len(title) >= 8:
                 return _clean_title(title), 0.65
@@ -109,9 +120,9 @@ def _looks_like_title(value: str) -> bool:
         return False
     if TITLE_NOISE_RE.search(value):
         return False
-    has_act_word = bool(re.search(r"\bact\b", value, re.I))
+    has_designator_word = bool(TITLE_DESIGNATOR_RE.search(value))
     mostly_upper = value.upper() == value and any(char.isalpha() for char in value)
-    return has_act_word and (mostly_upper or len(value) < 160)
+    return has_designator_word and (mostly_upper or len(value) < 160)
 
 
 def _remove_act_number(value: str) -> str:

@@ -6,6 +6,7 @@ RELATIONSHIP_PHRASES: dict[RelationshipType, tuple[str, ...]] = {
     RelationshipType.AMENDS: (
         "amended by",
         "is amended",
+        "is hereby amended",
         "shall be amended",
         "amendment of section",
         "principal enactment is hereby amended",
@@ -21,6 +22,7 @@ RELATIONSHIP_PHRASES: dict[RelationshipType, tuple[str, ...]] = {
         "inserted immediately after section",
         "there shall be inserted",
         "is inserted",
+        "is hereby inserted",
     ),
     RelationshipType.SUBSTITUTES: (
         "by the substitution for",
