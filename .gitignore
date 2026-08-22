@@ -21,5 +21,11 @@ test_uploads/
 *.sqlite
 *.sqlite3
 
+# Local / project tooling & research artifacts (do not commit)
+docs/
+data/
+.cursor/
+.agents/
+
 .DS_Store
 Thumbs.db
