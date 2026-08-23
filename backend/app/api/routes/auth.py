@@ -182,11 +182,7 @@ def submit_lawyer_verification(
     return current_user
 
 
-@router.post(
-    "/forgot-password",
-    response_model=ForgotPasswordResponse,
-    response_model_exclude_none=True,
-)
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
 @limiter.limit(auth_rate_limit)
 def forgot_password(
     request: Request,
@@ -214,12 +210,13 @@ def forgot_password(
     )
     db.commit()
 
-    reset_url = f"{settings.frontend_url.rstrip('/')}/reset-password?token={raw_token}"
+    # Never return the raw token in the HTTP body (email enumeration / token leak).
+    # In development the reset URL is written to structured logs for local demos.
     logger.info("password_reset_requested", user_id=user.id)
-    if settings.environment.strip().lower() != "development":
-        return ForgotPasswordResponse(detail=RESET_MESSAGE)
-    logger.info("password_reset_dev_url", reset_url=reset_url)
-    return ForgotPasswordResponse(detail=RESET_MESSAGE, reset_token=raw_token, reset_url=reset_url)
+    if settings.environment.strip().lower() == "development":
+        reset_url = f"{settings.frontend_url.rstrip('/')}/reset-password?token={raw_token}"
+        logger.info("password_reset_dev_url", reset_url=reset_url)
+    return ForgotPasswordResponse(detail=RESET_MESSAGE)
 
 
 @router.post("/reset-password")

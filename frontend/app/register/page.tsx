@@ -51,7 +51,6 @@ export default function RegisterPage() {
       await register({
         email,
         password,
-        account_type: isAttorney ? "attorney" : "general",
       });
       if (isAttorney) {
         const session = await login(email, password, false);

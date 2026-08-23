@@ -98,6 +98,7 @@ async def request_logging_middleware(request: Request, call_next):
 
 @app.get("/health", tags=["health"])
 def health(db: Session = Depends(get_db)) -> JSONResponse:
+    current_settings = get_settings()
     checks = {
         "database": _check_database(db),
         "upload_directory": _check_upload_directory(),
@@ -108,7 +109,7 @@ def health(db: Session = Depends(get_db)) -> JSONResponse:
         status_code=200 if healthy else 503,
         content={
             "status": "ok" if healthy else "degraded",
-            "app": settings.app_name,
+            "app": current_settings.app_name,
             "checks": checks,
         },
     )
@@ -129,7 +130,7 @@ def _check_upload_directory() -> dict[str, object]:
 
 def _check_parser_configuration() -> dict[str, object]:
     known_parsers = {"", "pymupdf", "docling", "ocr"}
-    requested = settings.doc_parser_primary.strip().lower()
+    requested = get_settings().doc_parser_primary.strip().lower()
     if requested not in known_parsers:
         return {"ok": False, "error": f"Unknown DOC_PARSER_PRIMARY={requested!r}."}
     return {"ok": True, "parser_requested": requested or "pymupdf"}
