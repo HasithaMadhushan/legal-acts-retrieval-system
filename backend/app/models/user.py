@@ -30,6 +30,9 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     uploaded_acts = relationship("LegalAct", back_populates="uploaded_by")
     saved_items = relationship("SavedItem", back_populates="user", cascade="all, delete-orphan")
+    reading_history_items = relationship(
+        "ReadingHistoryItem", back_populates="user", cascade="all, delete-orphan"
+    )
     password_reset_tokens = relationship(
         "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
     )

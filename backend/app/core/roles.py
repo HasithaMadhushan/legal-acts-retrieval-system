@@ -70,3 +70,8 @@ class SavedItemType(str, Enum):
     ACT = "ACT"
     SECTION = "SECTION"
     REFERENCE = "REFERENCE"
+
+
+class ReadingHistoryItemType(str, Enum):
+    ACT = "ACT"
+    SECTION = "SECTION"
