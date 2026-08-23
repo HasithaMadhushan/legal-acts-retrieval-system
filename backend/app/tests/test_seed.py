@@ -1,10 +1,14 @@
 from unittest.mock import MagicMock
 
+from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import Settings
 from app.db.seed import seed_demo_users
 from app.db.session import SessionLocal
 from app.models.user import User
+
+PROD_SECRET = "x" * 32
 
 
 def test_seed_demo_users_creates_all_demo_accounts_from_empty(client):
@@ -43,3 +47,60 @@ def test_seed_demo_users_survives_concurrent_insert_race(client):
         seed_demo_users(db)  # must not raise
 
         rollback.assert_called_once()
+
+
+def test_should_seed_demo_data_defaults_to_development_only():
+    assert Settings(environment="development").should_seed_demo_data is True
+    assert Settings(environment="staging").should_seed_demo_data is False
+    assert Settings(environment="production", secret_key=PROD_SECRET).should_seed_demo_data is False
+
+
+def test_should_seed_demo_data_explicit_override_wins():
+    assert Settings(seed_demo_data=False).should_seed_demo_data is False
+    assert (
+        Settings(
+            seed_demo_data=True, environment="production", secret_key=PROD_SECRET
+        ).should_seed_demo_data
+        is True
+    )
+
+
+class _NoSeedSettings:
+    auto_migrate_on_startup = False
+    environment = "production"
+    seed_demo_data = False
+    should_seed_demo_data = False
+    app_name = "test"
+
+
+def test_startup_does_not_seed_demo_users_when_disabled(client, monkeypatch):
+    import app.main as main_module
+
+    with SessionLocal() as db:
+        db.query(User).delete()
+        db.commit()
+
+    monkeypatch.setattr(main_module, "get_settings", lambda: _NoSeedSettings())
+    with TestClient(main_module.app):
+        pass
+
+    with SessionLocal() as db:
+        assert db.query(User).count() == 0
+
+
+def test_startup_seeds_demo_users_when_enabled(client, monkeypatch):
+    import app.main as main_module
+
+    with SessionLocal() as db:
+        db.query(User).delete()
+        db.commit()
+
+    monkeypatch.setattr(main_module, "get_settings", lambda: _NoSeedSettings())
+    monkeypatch.setattr(
+        _NoSeedSettings, "should_seed_demo_data", True, raising=False
+    )
+    with TestClient(main_module.app):
+        pass
+
+    with SessionLocal() as db:
+        assert db.query(User).count() > 0

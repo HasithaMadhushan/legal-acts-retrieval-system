@@ -39,6 +39,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://legal_acts:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the production env file}@db:5432/legal_acts
       ENVIRONMENT: production
+      # Defense in depth: demo accounts (well-known passwords) must never be
+      # seeded here even if ENVIRONMENT is ever misconfigured.
+      SEED_DEMO_DATA: "false"
       SECRET_KEY: ${SECRET_KEY:?Set a unique SECRET_KEY in the production env file}
       CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS to the real frontend origin(s)}
       LOG_FORMAT: json

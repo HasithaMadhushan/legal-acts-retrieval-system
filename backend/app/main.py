@@ -17,6 +17,7 @@ from app.api.routes import (
     auth,
     evaluation,
     exports,
+    reading_history,
     references,
     relationships,
     saved_items,
@@ -44,8 +45,9 @@ access_logger = get_logger("app.request")
 async def lifespan(app: FastAPI):
     if get_settings().auto_migrate_on_startup:
         run_migrations()
-    with SessionLocal() as db:
-        seed_demo_users(db)
+    if get_settings().should_seed_demo_data:
+        with SessionLocal() as db:
+            seed_demo_users(db)
     logger.info("app_startup_complete", environment=get_settings().environment)
     yield
 
@@ -150,5 +152,6 @@ app.include_router(references.router, prefix=api_prefix)
 app.include_router(search.router, prefix=api_prefix)
 app.include_router(relationships.router, prefix=api_prefix)
 app.include_router(saved_items.router, prefix=api_prefix)
+app.include_router(reading_history.router, prefix=api_prefix)
 app.include_router(exports.router, prefix=api_prefix)
 app.include_router(evaluation.router, prefix=api_prefix)

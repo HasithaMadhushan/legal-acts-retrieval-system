@@ -23,6 +23,9 @@ NO_LEGAL_ADVICE_MESSAGE = (
 class Settings(BaseSettings):
     app_name: str = "Automated Legal Acts Retrieval System"
     environment: str = "development"
+    # Demo accounts are seeded only in development by default. Set
+    # SEED_DEMO_DATA=true/false to override (e.g. a staging demo deployment).
+    seed_demo_data: bool | None = None
     database_url: str = "sqlite:///./legal_acts.db"
     secret_key: str = DEFAULT_DEV_SECRET_KEY
     access_token_expire_minutes: int = 480
@@ -72,6 +75,17 @@ class Settings(BaseSettings):
                 "Refusing to start with the default SECRET_KEY while ENVIRONMENT=production. "
                 "Set a unique SECRET_KEY via environment variable or .env file."
             )
+
+    @property
+    def should_seed_demo_data(self) -> bool:
+        """Explicit SEED_DEMO_DATA wins; otherwise seed in development only.
+
+        Demo accounts ship well-known passwords (see app/db/seed.py), so they
+        must never be (re)created outside development by accident.
+        """
+        if self.seed_demo_data is not None:
+            return self.seed_demo_data
+        return self.environment.strip().lower() == "development"
         return self
 
     @property
