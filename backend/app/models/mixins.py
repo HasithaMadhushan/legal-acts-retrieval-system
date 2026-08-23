@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import DateTime, String
@@ -9,10 +9,14 @@ def uuid_str() -> str:
     return str(uuid4())
 
 
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
     )
 
 

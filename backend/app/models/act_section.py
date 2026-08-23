@@ -1,4 +1,4 @@
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.roles import SectionType, VerificationStatus
@@ -28,6 +28,7 @@ class ActSection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
         nullable=False,
     )
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
 
     act = relationship("LegalAct", back_populates="sections")
     parent_section = relationship("ActSection", remote_side="ActSection.id")

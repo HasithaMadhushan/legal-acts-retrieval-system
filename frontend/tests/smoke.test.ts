@@ -248,6 +248,25 @@ describe("frontend role and safety smoke checks", () => {
     expect(preview).not.toContain("Clear mapping");
   });
 
+  it("redirects expired sessions to login and exposes legal pages", () => {
+    const api = readFileSync("lib/api.ts", "utf8");
+    const loginPage = readFileSync("app/login/page.tsx", "utf8");
+    const shell = readFileSync("components/app-shell.tsx", "utf8");
+    const terms = readFileSync("app/legal/terms/page.tsx", "utf8");
+    const privacy = readFileSync("app/legal/privacy/page.tsx", "utf8");
+    const errorPage = readFileSync("app/error.tsx", "utf8");
+    const notFound = readFileSync("app/not-found.tsx", "utf8");
+    expect(api).toContain("export class ApiError");
+    expect(api).toContain("expired=1");
+    expect(loginPage).toContain("Session expired — sign in again");
+    expect(shell).toContain("/legal/terms");
+    expect(shell).toContain("/legal/privacy");
+    expect(terms).toContain("No legal advice");
+    expect(privacy).toContain("We do not sell personal data");
+    expect(errorPage).toContain("Something went wrong");
+    expect(notFound).toContain("Page not found");
+  });
+
   it("lawyer workspace exposes saved item groups, note editing, and exports", () => {
     const workspacePage = readFileSync("app/lawyer/workspace/page.tsx", "utf8");
     const saveButton = readFileSync("components/save-item-button.tsx", "utf8");

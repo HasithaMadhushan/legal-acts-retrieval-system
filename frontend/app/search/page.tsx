@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,12 +14,21 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { SearchResults } from "@/components/search-results";
-import { search } from "@/lib/api";
+import { ApiError, search } from "@/lib/api";
 import { containsAdviceIntent } from "@/lib/auth";
 import type { SearchResponse } from "@/lib/types";
 
 export default function SearchPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading search...</p>}>
+      <SearchForm />
+    </Suspense>
+  );
+}
+
+function SearchForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [query, setQuery] = useState("");
   const [year, setYear] = useState("");
   const [actNumber, setActNumber] = useState("");
@@ -33,18 +42,64 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const initialQuery = params.get("q");
+    const initialQuery = searchParams.get("q") ?? "";
+    const initialYear = searchParams.get("year") ?? "";
+    const initialActNumber = searchParams.get("act_number") ?? "";
+    const initialMode = searchParams.get("search_mode") ?? "all";
+    const initialStatus = searchParams.get("verification_status") ?? "VERIFIED";
+    const initialOffset = Number(searchParams.get("offset") ?? "0") || 0;
+    setQuery(initialQuery);
+    setYear(initialYear);
+    setActNumber(initialActNumber);
+    setSearchMode(initialMode);
+    setVerificationStatus(initialStatus);
     if (initialQuery) {
-      setQuery(initialQuery);
-      void runSearch(0, initialQuery);
+      void runSearch(initialOffset, initialQuery, {
+        year: initialYear,
+        actNumber: initialActNumber,
+        searchMode: initialMode,
+        verificationStatus: initialStatus
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function runSearch(nextOffset = 0, queryOverride?: string) {
+  function syncUrl(nextOffset: number, values: {
+    query: string;
+    year: string;
+    actNumber: string;
+    searchMode: string;
+    verificationStatus: string;
+  }) {
+    const params = new URLSearchParams();
+    if (values.query) params.set("q", values.query);
+    if (values.year) params.set("year", values.year);
+    if (values.actNumber) params.set("act_number", values.actNumber);
+    if (values.searchMode && values.searchMode !== "all") params.set("search_mode", values.searchMode);
+    if (values.verificationStatus && values.verificationStatus !== "VERIFIED") {
+      params.set("verification_status", values.verificationStatus);
+    }
+    if (nextOffset) params.set("offset", String(nextOffset));
+    const qs = params.toString();
+    router.replace(qs ? `/search?${qs}` : "/search");
+  }
+
+  async function runSearch(
+    nextOffset = 0,
+    queryOverride?: string,
+    overrides?: {
+      year?: string;
+      actNumber?: string;
+      searchMode?: string;
+      verificationStatus?: string;
+    }
+  ) {
     setError("");
     const trimmedQuery = (queryOverride ?? query).trim();
+    const nextYear = overrides?.year ?? year;
+    const nextActNumber = overrides?.actNumber ?? actNumber;
+    const nextMode = overrides?.searchMode ?? searchMode;
+    const nextStatus = overrides?.verificationStatus ?? verificationStatus;
     if (containsAdviceIntent(trimmedQuery)) {
       setError("This system cannot provide legal advice. Search for Acts, sections, or legal terms instead.");
       return;
@@ -52,22 +107,33 @@ export default function SearchPage() {
     setLoading(true);
     try {
       const data = await search(trimmedQuery, {
-        ...(year ? { year } : {}),
-        ...(actNumber ? { act_number: actNumber } : {}),
+        ...(nextYear ? { year: nextYear } : {}),
+        ...(nextActNumber ? { act_number: nextActNumber } : {}),
         ...(relationshipType && relationshipType !== "ANY"
           ? { relationship_type: relationshipType }
           : {}),
-        ...(verificationStatus && verificationStatus !== "ANY"
-          ? { verification_status: verificationStatus }
-          : {}),
-        search_mode: searchMode,
+        ...(nextStatus && nextStatus !== "ANY" ? { verification_status: nextStatus } : {}),
+        search_mode: nextMode,
         limit,
         offset: String(nextOffset)
       });
       setResponse(data);
       setOffset(nextOffset);
+      syncUrl(nextOffset, {
+        query: trimmedQuery,
+        year: nextYear,
+        actNumber: nextActNumber,
+        searchMode: nextMode,
+        verificationStatus: nextStatus
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed. Login may be required.");
+      if (err instanceof ApiError && err.status === 400) {
+        setError("Semantic search is not enabled yet. Use Keyword or All methods.");
+      } else if (err instanceof ApiError && err.status === 401) {
+        setError("Session expired — sign in again");
+      } else {
+        setError(err instanceof Error ? err.message : "Search failed. Login may be required.");
+      }
     } finally {
       setLoading(false);
     }
@@ -75,7 +141,6 @@ export default function SearchPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    router.replace(query.trim() ? `/search?q=${encodeURIComponent(query.trim())}` : "/search");
     await runSearch(0);
   }
 

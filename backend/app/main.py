@@ -32,6 +32,7 @@ from app.core.rate_limit import limiter
 from app.db.migrate import run_migrations
 from app.db.seed import seed_demo_users
 from app.db.session import SessionLocal, get_db
+from app.services.stale_jobs import fail_stale_running_jobs
 from app.services.storage import get_storage
 
 configure_logging()
@@ -45,6 +46,8 @@ access_logger = get_logger("app.request")
 async def lifespan(app: FastAPI):
     if get_settings().auto_migrate_on_startup:
         run_migrations()
+    with SessionLocal() as db:
+        fail_stale_running_jobs(db, older_than_minutes=30)
     if get_settings().should_seed_demo_data:
         with SessionLocal() as db:
             seed_demo_users(db)

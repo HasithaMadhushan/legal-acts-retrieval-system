@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey
+from sqlalchemy import DateTime, Enum, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.roles import ReadingHistoryItemType
@@ -10,6 +10,15 @@ from app.models.mixins import UUIDPrimaryKeyMixin
 
 class ReadingHistoryItem(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "reading_history_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "item_type",
+            "act_id",
+            "section_id",
+            name="uq_reading_history_identity",
+        ),
+    )
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     item_type: Mapped[ReadingHistoryItemType] = mapped_column(

@@ -33,6 +33,7 @@ function LoginForm() {
   const [pending, setPending] = useState(false);
   const registered = searchParams.get("registered") === "1";
   const reset = searchParams.get("reset") === "1";
+  const expired = searchParams.get("expired") === "1";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -71,6 +72,11 @@ function LoginForm() {
           {reset ? (
             <Alert>
               <AlertDescription>Password updated. Sign in with your new password.</AlertDescription>
+            </Alert>
+          ) : null}
+          {expired ? (
+            <Alert variant="destructive">
+              <AlertDescription>Session expired — sign in again.</AlertDescription>
             </Alert>
           ) : null}
           {error ? (

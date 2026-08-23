@@ -5,7 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.roles import ParserName, ProcessingStatus
 from app.db.base import Base
-from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin, utc_now
 
 
 class LegalAct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -38,7 +38,7 @@ class LegalAct(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     processing_error: Mapped[str | None] = mapped_column(Text)
     uploaded_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
-    uploaded_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(default=utc_now, index=True, nullable=False)
 
     uploaded_by = relationship("User", back_populates="uploaded_acts")
     sections = relationship("ActSection", back_populates="act", cascade="all, delete-orphan")

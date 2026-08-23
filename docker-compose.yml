@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: legal_acts
       POSTGRES_USER: legal_acts
@@ -37,6 +37,14 @@ services:
       # SENTRY_DSN: ""
       # Gunicorn worker count (see backend/Dockerfile); 2 is plenty for local dev.
       # WEB_CONCURRENCY: "2"
+      # LLM hybrid extraction stays off until gold-set eval beats regex-only.
+      # LLM_EXTRACTION_ENABLED: "false"
+      # LLM_PROVIDER: gemini
+      # LLM_MODEL: gemini-2.0-flash
+      # LLM_API_KEY: ""
+      # Semantic search stays off until retrieval eval beats keyword search.
+      # SEMANTIC_SEARCH_ENABLED: "false"
+      # ENABLE_PGVECTOR: "false"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

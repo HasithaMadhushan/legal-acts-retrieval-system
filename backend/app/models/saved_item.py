@@ -1,4 +1,4 @@
-from sqlalchemy import Enum, ForeignKey, Text
+from sqlalchemy import Enum, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.roles import SavedItemType
@@ -8,6 +8,16 @@ from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 class SavedItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "saved_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "item_type",
+            "act_id",
+            "section_id",
+            "reference_id",
+            name="uq_saved_items_identity",
+        ),
+    )
 
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
     item_type: Mapped[SavedItemType] = mapped_column(

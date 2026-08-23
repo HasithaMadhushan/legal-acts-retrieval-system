@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { getEvaluationMetricsSummary, listActs, processAct } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { getAct, getEvaluationMetricsSummary, listActs, processAct } from "@/lib/api";
 import type { EvaluationMetricsSummary, LegalAct } from "@/lib/types";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
@@ -19,6 +19,7 @@ export default function AdminActsPage() {
   const [metrics, setMetrics] = useState<EvaluationMetricsSummary | null>(null);
   const [error, setError] = useState("");
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
+  const cancelledRef = useRef(false);
 
   async function load() {
     try {
@@ -31,15 +32,20 @@ export default function AdminActsPage() {
   }
 
   useEffect(() => {
-    load();
+    cancelledRef.current = false;
+    void load();
+    return () => {
+      cancelledRef.current = true;
+    };
   }, []);
 
   async function pollActUntilFinished(id: string) {
     for (let attempt = 0; attempt < PROCESSING_POLL_MAX_ATTEMPTS; attempt += 1) {
-      const updated = await listActs();
-      setActs(updated);
-      const act = updated.find((item) => item.id === id);
-      if (!act || act.processing_status !== "PROCESSING") return;
+      if (cancelledRef.current) return;
+      const updated = await getAct(id);
+      if (cancelledRef.current) return;
+      setActs((current) => current.map((item) => (item.id === id ? { ...item, ...updated } : item)));
+      if (updated.processing_status !== "PROCESSING") return;
       await sleep(PROCESSING_POLL_INTERVAL_MS);
     }
   }

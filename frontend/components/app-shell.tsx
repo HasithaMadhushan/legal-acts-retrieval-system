@@ -69,7 +69,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setFullName(null);
         setHasToken(false);
       });
-  }, [pathname]);
+  }, []);
 
   function logout() {
     clearSession();
@@ -187,6 +187,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         <main className="mx-auto w-full max-w-[1180px] flex-1 px-4 py-6 md:px-7">{children}</main>
+        <footer className="border-t border-border px-4 py-4 text-xs text-muted-foreground md:px-7">
+          <div className="mx-auto flex w-full max-w-[1180px] flex-wrap gap-4">
+            <Link href="/legal/terms" className="hover:text-foreground">
+              Terms of Use
+            </Link>
+            <Link href="/legal/privacy" className="hover:text-foreground">
+              Privacy Policy
+            </Link>
+            <span>This system does not provide legal advice.</span>
+          </div>
+        </footer>
       </div>
     </div>
   );

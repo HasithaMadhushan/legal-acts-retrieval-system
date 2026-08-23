@@ -163,6 +163,17 @@ export default function RegisterPage() {
           {submitLabel}
         </Button>
         <p className="text-sm text-muted-foreground">
+          By creating an account you agree to the{" "}
+          <Link href="/legal/terms" className="underline">
+            Terms of Use
+          </Link>{" "}
+          and{" "}
+          <Link href="/legal/privacy" className="underline">
+            Privacy Policy
+          </Link>
+          .
+        </p>
+        <p className="text-sm text-muted-foreground">
           Already have an account?{" "}
           <Button variant="link" render={<Link href="/login" />} nativeButton={false}>
             Sign in

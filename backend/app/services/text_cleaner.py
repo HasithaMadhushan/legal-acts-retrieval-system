@@ -18,3 +18,11 @@ def normalize_for_search(text: str | None) -> str:
     lowered = unicodedata.normalize("NFKC", text).lower()
     lowered = re.sub(r"[^a-z0-9]+", " ", lowered)
     return re.sub(r"\s+", " ", lowered).strip()
+
+
+def escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def like_contains(value: str) -> str:
+    return f"%{escape_like(value)}%"

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
@@ -88,13 +90,13 @@ def create_saved_item(
     payload: SavedItemCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_lawyer_or_admin),
-) -> dict:
+) -> dict | JSONResponse:
     values = _validated_target_values(db, payload)
     duplicate = _duplicate_saved_item(db, current_user.id, payload.item_type, values)
     if duplicate:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This item is already saved in your workspace.",
+        return JSONResponse(
+            status_code=200,
+            content=jsonable_encoder(enrich_saved_item(duplicate)),
         )
     item = SavedItem(
         user_id=current_user.id,

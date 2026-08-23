@@ -31,6 +31,8 @@ class EvaluationRunCreate(BaseModel):
     run_name: str
     act_id: str | None = None
     section_segmentation_accuracy: float | None = None
+    extraction_mode: str | None = None
+    extraction_mode: str | None = None
 
 
 class EvaluationRunRead(BaseModel):

@@ -36,7 +36,7 @@ jobs:
       - name: Test (pytest)
         # app/tests/conftest.py sets DATABASE_URL/SECRET_KEY/UPLOAD_DIR/etc. itself
         # (SQLite, PyMuPDF-only) so tests need no external services or secrets.
-        run: python -m pytest
+        run: python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=50
 
   frontend:
     name: Frontend (typecheck + test + build)

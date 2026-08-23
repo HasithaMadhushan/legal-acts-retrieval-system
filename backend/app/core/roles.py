@@ -57,6 +57,7 @@ class ExtractionMethod(str, Enum):
     REGEX = "REGEX"
     NLP_RULE = "NLP_RULE"
     MANUAL = "MANUAL"
+    LLM = "LLM"
 
 
 class ProcessingJobStatus(str, Enum):

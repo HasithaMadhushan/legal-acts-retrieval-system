@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_admin
@@ -118,12 +119,23 @@ def upload_act(
     if mime_type not in PDF_MIME_TYPES:
         raise HTTPException(status_code=400, detail="Only PDF MIME types are allowed.")
 
-    content = file.file.read()
+    hasher = hashlib.sha256()
+    chunks: list[bytes] = []
+    total = 0
+    limit = settings.max_upload_size_bytes
+    while True:
+        chunk = file.file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="PDF exceeds configured upload size limit.")
+        hasher.update(chunk)
+        chunks.append(chunk)
+    content = b"".join(chunks)
     if not content.startswith(PDF_SIGNATURE):
         raise HTTPException(status_code=400, detail="Uploaded file content is not a valid PDF.")
-    if len(content) > settings.max_upload_size_bytes:
-        raise HTTPException(status_code=413, detail="PDF exceeds configured upload size limit.")
-    digest = hashlib.sha256(content).hexdigest()
+    digest = hasher.hexdigest()
     if db.query(LegalAct).filter(LegalAct.file_sha256 == digest).first():
         raise HTTPException(status_code=409, detail="This PDF has already been uploaded.")
 
@@ -198,8 +210,30 @@ def delete_act(
     act = db.get(LegalAct, act_id)
     if not act:
         raise HTTPException(status_code=404, detail="Act not found.")
-    db.delete(act)
-    db.commit()
+    incoming = (
+        db.query(LegalReference)
+        .filter(LegalReference.target_act_id == act_id)
+        .first()
+    )
+    if incoming:
+        raise HTTPException(
+            status_code=409,
+            detail="Act is referenced by other Acts and cannot be deleted.",
+        )
+    stored_key = act.stored_file_path
+    try:
+        db.delete(act)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Act is referenced by other Acts and cannot be deleted.",
+        ) from None
+    try:
+        get_storage().delete(stored_key)
+    except Exception:
+        pass
     return {"detail": "Act deleted."}
 
 

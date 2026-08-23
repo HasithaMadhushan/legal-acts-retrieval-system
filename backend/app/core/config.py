@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     s3_bucket: str | None = None
     s3_prefix: str = ""
     s3_endpoint_url: str | None = None
+    # LLM hybrid extraction is off until gold-set eval says it beats regex-only.
+    llm_extraction_enabled: bool = False
+    llm_provider: str = "gemini"
+    llm_model: str = "gemini-2.0-flash"
+    llm_api_key: str | None = None
+    llm_max_sections_per_act: int = 40
+    # Semantic search is off until retrieval eval says it beats keyword search.
+    semantic_search_enabled: bool = False
+    enable_pgvector: bool = False
+    embedding_provider: str = "hash"
+    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_dimension: int = 384
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -75,6 +87,7 @@ class Settings(BaseSettings):
                 "Refusing to start with the default SECRET_KEY while ENVIRONMENT=production. "
                 "Set a unique SECRET_KEY via environment variable or .env file."
             )
+        return self
 
     @property
     def should_seed_demo_data(self) -> bool:
@@ -86,7 +99,6 @@ class Settings(BaseSettings):
         if self.seed_demo_data is not None:
             return self.seed_demo_data
         return self.environment.strip().lower() == "development"
-        return self
 
     @property
     def cors_origin_list(self) -> list[str]:
