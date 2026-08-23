@@ -1,6 +1,6 @@
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -12,7 +12,7 @@ from app.core.logging import get_logger
 from app.core.passwords import full_name_from_email
 from app.core.rate_limit import auth_rate_limit, limiter
 from app.core.roles import UserRole
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import create_access_token, hash_password, utc_now_naive, verify_password
 from app.db.session import get_db
 from app.models.password_reset_token import PasswordResetToken
 from app.models.user import (
@@ -44,10 +44,28 @@ PROOF_CONTENT_TYPES = {
     "image/png": (".png", PROOF_PNG_SIGNATURE),
 }
 RESET_MESSAGE = "If that email is registered, a password reset link will be issued."
+READ_CHUNK_SIZE = 1024 * 64
 
 
 def _hash_reset_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _read_upload_with_limit(upload: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = upload.file.read(READ_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail="Proof file exceeds configured upload size limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _current_user_payload(user: User) -> CurrentUserResponse:
@@ -100,7 +118,12 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
         )
     )
     return TokenResponse(
-        access_token=create_access_token(user.id, user.role.value, expires_delta=expires),
+        access_token=create_access_token(
+            user.id,
+            user.role.value,
+            token_version=user.token_version,
+            expires_delta=expires,
+        ),
         role=user.role,
         disclaimer=LEGAL_DISCLAIMER,
     )
@@ -141,15 +164,10 @@ def submit_lawyer_verification(
     if content_type not in PROOF_CONTENT_TYPES:
         raise HTTPException(status_code=400, detail="Proof must be a PDF, JPEG, or PNG file.")
     suffix, signature = PROOF_CONTENT_TYPES[content_type]
-    content = file.file.read()
+    settings = get_settings()
+    content = _read_upload_with_limit(file, settings.max_upload_size_bytes)
     if not content.startswith(signature):
         raise HTTPException(status_code=400, detail="Uploaded proof file content is not valid.")
-    settings = get_settings()
-    if len(content) > settings.max_upload_size_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail="Proof file exceeds configured upload size limit.",
-        )
 
     stored_name = f"lawyer-proof-{current_user.id}-{uuid4()}{suffix}"
     stored_key = get_storage().save(stored_name, content)
@@ -179,7 +197,7 @@ def forgot_password(
     if not user or not user.is_active:
         return ForgotPasswordResponse(detail=RESET_MESSAGE)
 
-    now = datetime.utcnow()
+    now = utc_now_naive()
     db.query(PasswordResetToken).filter(
         PasswordResetToken.user_id == user.id,
         PasswordResetToken.used_at.is_(None),
@@ -198,7 +216,7 @@ def forgot_password(
 
     reset_url = f"{settings.frontend_url.rstrip('/')}/reset-password?token={raw_token}"
     logger.info("password_reset_requested", user_id=user.id)
-    if settings.environment.strip().lower() == "production":
+    if settings.environment.strip().lower() != "development":
         return ForgotPasswordResponse(detail=RESET_MESSAGE)
     logger.info("password_reset_dev_url", reset_url=reset_url)
     return ForgotPasswordResponse(detail=RESET_MESSAGE, reset_token=raw_token, reset_url=reset_url)
@@ -215,17 +233,14 @@ def reset_password(
     record = (
         db.query(PasswordResetToken).filter(PasswordResetToken.token_hash == token_hash).first()
     )
-    now = datetime.utcnow()
-    if (
-        record is None
-        or record.used_at is not None
-        or record.expires_at < now
-    ):
+    now = utc_now_naive()
+    if record is None or record.used_at is not None or record.expires_at < now:
         raise HTTPException(status_code=400, detail="Reset token is invalid or expired.")
     user = db.get(User, record.user_id)
     if user is None or not user.is_active:
         raise HTTPException(status_code=400, detail="Reset token is invalid or expired.")
     user.hashed_password = hash_password(payload.password)
+    user.token_version += 1
     record.used_at = now
     db.commit()
     return {"detail": "Password has been reset. You can sign in with the new password."}

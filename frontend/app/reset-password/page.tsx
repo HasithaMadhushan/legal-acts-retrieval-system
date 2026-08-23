@@ -9,9 +9,7 @@ import { PasswordField } from "@/components/auth/password-field";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { FieldGroup } from "@/components/ui/field";
-
-const PASSWORD_HINT = "Use at least 8 characters with letters and numbers.";
-const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+import { PASSWORD_HINT, passwordMeetsPolicy } from "@/lib/password-policy";
 
 export default function ResetPasswordPage() {
   return (
@@ -43,7 +41,7 @@ function ResetPasswordForm() {
       setError("Password and confirmation do not match.");
       return;
     }
-    if (!PASSWORD_PATTERN.test(password)) {
+    if (!passwordMeetsPolicy(password)) {
       setError(PASSWORD_HINT);
       return;
     }

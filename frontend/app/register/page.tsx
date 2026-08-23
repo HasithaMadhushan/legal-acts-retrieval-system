@@ -21,9 +21,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-
-const PASSWORD_HINT = "Use at least 8 characters with letters and numbers.";
-const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+import { PASSWORD_HINT, passwordMeetsPolicy } from "@/lib/password-policy";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -44,7 +42,7 @@ export default function RegisterPage() {
       setError("Password and confirmation do not match.");
       return;
     }
-    if (!PASSWORD_PATTERN.test(password)) {
+    if (!passwordMeetsPolicy(password)) {
       setError(PASSWORD_HINT);
       return;
     }

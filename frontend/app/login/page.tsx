@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { login } from "@/lib/api";
-import { setSession } from "@/lib/auth";
+import { safeNextPath, setSession } from "@/lib/auth";
 import { AuthLayout } from "@/components/auth/auth-layout";
 import { PasswordField } from "@/components/auth/password-field";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -41,15 +41,13 @@ function LoginForm() {
     try {
       const response = await login(email, password, rememberMe);
       setSession(response.access_token, response.role, rememberMe);
-      const nextPath = searchParams.get("next");
-      router.push(
-        nextPath ??
-          (response.role === "ADMIN"
-            ? "/admin/acts"
-            : response.role === "LAWYER"
-              ? "/lawyer/search"
-              : "/search")
-      );
+      const fallback =
+        response.role === "ADMIN"
+          ? "/admin/acts"
+          : response.role === "LAWYER"
+            ? "/lawyer/search"
+            : "/search";
+      router.push(safeNextPath(searchParams.get("next"), fallback));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed.");
     } finally {
@@ -62,12 +60,6 @@ function LoginForm() {
       kicker="Gazette access"
       title="Sign in"
       description="Enter your email and password to continue."
-      belowCard={
-        <p className="text-xs text-muted-foreground">
-          Thesis demo accounts: admin@example.com / AdminPass123!, lawyer@example.com /
-          LawyerPass123!, user@example.com / UserPass123!
-        </p>
-      }
     >
       <form className="flex flex-col gap-5" onSubmit={submit}>
         <FieldGroup>

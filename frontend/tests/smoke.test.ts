@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { canAccessRoute, containsAdviceIntent, navItemsForRole } from "../lib/auth";
+import { canAccessRoute, containsAdviceIntent, navItemsForRole, safeNextPath } from "../lib/auth";
 
 describe("frontend role and safety smoke checks", () => {
   it("hides admin routes from non-admin roles", () => {
@@ -33,6 +33,13 @@ describe("frontend role and safety smoke checks", () => {
     expect(containsAdviceIntent("what should I do in my case")).toBe(true);
   });
 
+  it("rejects open redirects in login next paths", () => {
+    expect(safeNextPath("/search", "/dashboard")).toBe("/search");
+    expect(safeNextPath("//evil.com", "/dashboard")).toBe("/dashboard");
+    expect(safeNextPath("https://evil.com", "/dashboard")).toBe("/dashboard");
+    expect(safeNextPath(null, "/dashboard")).toBe("/dashboard");
+  });
+
   it("register page exposes account type and attorney verification copy", () => {
     const registerPage = readFileSync("app/register/page.tsx", "utf8");
     const attorneyPage = readFileSync("app/register/attorney-verification/page.tsx", "utf8");
@@ -59,8 +66,9 @@ describe("frontend role and safety smoke checks", () => {
     expect(loginPage).toContain("Forgot password?");
     expect(loginPage).toContain("Create an account");
     expect(passwordField).toContain("Show password");
-    expect(loginPage).toContain("AdminPass123!");
-    expect(loginPage).not.toContain('useState("AdminPass123!")');
+    expect(loginPage).not.toContain("AdminPass123!");
+    expect(loginPage).not.toContain("LawyerPass123!");
+    expect(loginPage).not.toContain("UserPass123!");
     expect(searchPage).toContain("Search verified legal information");
     expect(searchPage).toContain("Category");
     expect(searchPage).toContain("Relationship type");

@@ -46,6 +46,12 @@ export function canAccessRoute(pathname: string, role: Role | null) {
   return true;
 }
 
+export function safeNextPath(nextPath: string | null, fallback: string) {
+  if (!nextPath) return fallback;
+  if (!nextPath.startsWith("/") || nextPath.startsWith("//")) return fallback;
+  return nextPath;
+}
+
 export function navItemsForRole(role: Role | null) {
   const base = [
     { href: "/", label: "Home" },
