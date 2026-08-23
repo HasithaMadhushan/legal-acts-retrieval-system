@@ -18,6 +18,16 @@ import { ApiError, search } from "@/lib/api";
 import { containsAdviceIntent } from "@/lib/auth";
 import type { SearchResponse } from "@/lib/types";
 
+function searchErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status === 400) {
+    return "Semantic search is not enabled yet. Use Keyword or All methods.";
+  }
+  if (err instanceof ApiError && err.status === 401) {
+    return "Session expired — sign in again";
+  }
+  return err instanceof Error ? err.message : "Search failed. Login may be required.";
+}
+
 export default function SearchPage() {
   return (
     <Suspense fallback={<p className="text-sm text-muted-foreground">Loading search...</p>}>
@@ -82,16 +92,6 @@ function SearchForm() {
     if (nextOffset) params.set("offset", String(nextOffset));
     const qs = params.toString();
     router.replace(qs ? `/search?${qs}` : "/search");
-  }
-
-  function searchErrorMessage(err: unknown): string {
-    if (err instanceof ApiError && err.status === 400) {
-      return "Semantic search is not enabled yet. Use Keyword or All methods.";
-    }
-    if (err instanceof ApiError && err.status === 401) {
-      return "Session expired — sign in again";
-    }
-    return err instanceof Error ? err.message : "Search failed. Login may be required.";
   }
 
   function buildSearchParams(values: {
