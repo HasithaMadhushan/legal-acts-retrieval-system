@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { approveLawyerRequest, listUsers, rejectLawyerRequest } from "@/lib/api";
+import { approveLawyerRequest, exportUrl, listUsers, rejectLawyerRequest } from "@/lib/api";
+import { getToken } from "@/lib/auth";
 import type { User } from "@/lib/types";
 import { RoleGuard } from "@/components/role-guard";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -51,6 +52,35 @@ export default function AdminUsersPage() {
     }
   }
 
+  async function downloadProof(userId: string) {
+    setError("");
+    const token = getToken();
+    if (!token) {
+      setError("Sign in again to download enrollment proof.");
+      return;
+    }
+    try {
+      const response = await fetch(exportUrl(`/users/${userId}/enrollment-proof`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        throw new Error("Unable to download enrollment proof.");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const match = /filename="?([^"]+)"?/i.exec(disposition);
+      const filename = match?.[1] ?? `enrollment-proof-${userId}`;
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to download enrollment proof.");
+    }
+  }
+
   return (
     <RoleGuard allowed={["ADMIN"]} path="/admin/users">
       <div className="flex flex-col gap-4">
@@ -63,7 +93,8 @@ export default function AdminUsersPage() {
           <CardHeader>
             <CardTitle>Pending attorney requests</CardTitle>
             <CardDescription>
-              Approve enrollment proof to grant LAWYER access. Until then the account stays General User.
+              Review enrollment proof, then approve to grant LAWYER access. Until then the account
+              stays General User.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -86,7 +117,10 @@ export default function AdminUsersPage() {
                       <TableCell>{user.email}</TableCell>
                       <TableCell>{user.enrollment_number ?? "—"}</TableCell>
                       <TableCell>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" onClick={() => downloadProof(user.id)}>
+                            Download proof
+                          </Button>
                           <Button
                             size="sm"
                             disabled={pendingId === user.id}

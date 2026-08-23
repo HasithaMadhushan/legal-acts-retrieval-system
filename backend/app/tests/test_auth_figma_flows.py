@@ -136,6 +136,13 @@ def test_admin_can_reject_lawyer_request(client, admin_token):
 
 
 def test_forgot_and_reset_password(client):
+    login_before = client.post(
+        "/api/v1/auth/login",
+        json={"email": "user@example.com", "password": "UserPass123!"},
+    )
+    assert login_before.status_code == 200
+    old_token = login_before.json()["access_token"]
+
     forgot = client.post(
         "/api/v1/auth/forgot-password",
         json={"email": "user@example.com"},
@@ -150,6 +157,9 @@ def test_forgot_and_reset_password(client):
         json={"token": token, "password": "BrandNewPass1"},
     )
     assert reset.status_code == 200
+
+    stale_me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {old_token}"})
+    assert stale_me.status_code == 401
 
     old_login = client.post(
         "/api/v1/auth/login",
@@ -170,6 +180,24 @@ def test_forgot_and_reset_password(client):
     assert reused.status_code == 400
 
 
+def test_forgot_password_hides_token_outside_development(client, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    get_settings.cache_clear()
+    try:
+        response = client.post(
+            "/api/v1/auth/forgot-password",
+            json={"email": "user@example.com"},
+        )
+        assert response.status_code == 200
+        assert "reset_token" not in response.json()
+        assert "reset_url" not in response.json()
+    finally:
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        get_settings.cache_clear()
+
+
 def test_forgot_password_unknown_email_does_not_leak(client):
     response = client.post(
         "/api/v1/auth/forgot-password",
@@ -178,3 +206,29 @@ def test_forgot_password_unknown_email_does_not_leak(client):
     assert response.status_code == 200
     assert "reset_token" not in response.json()
     assert "reset_url" not in response.json()
+
+
+def test_admin_can_download_enrollment_proof(client, admin_token):
+    client.post(
+        "/api/v1/auth/register",
+        json={"email": "proofuser@example.com", "password": "ProofPass1"},
+    )
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "proofuser@example.com", "password": "ProofPass1"},
+    )
+    token = login.json()["access_token"]
+    submitted = client.post(
+        "/api/v1/auth/lawyer-verification",
+        data={"enrollment_number": "SL-777"},
+        files={"file": ("proof.pdf", b"%PDF-1.4 enrollment proof bytes", "application/pdf")},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    user_id = submitted.json()["id"]
+    response = client.get(
+        f"/api/v1/users/{user_id}/enrollment-proof",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF")
+    assert "attachment" in response.headers.get("content-disposition", "")

@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_admin
@@ -12,8 +15,16 @@ from app.models.user import (
     User,
 )
 from app.schemas.user import UserCreate, UserRead, UserUpdate
+from app.services.storage import get_storage
 
 router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(require_admin)])
+
+PROOF_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+}
 
 
 @router.get("", response_model=list[UserRead])
@@ -55,6 +66,7 @@ def update_user(user_id: str, payload: UserUpdate, db: Session = Depends(get_db)
         setattr(user, key, value)
     if password:
         user.hashed_password = hash_password(password)
+        user.token_version += 1
     db.commit()
     db.refresh(user)
     return user
@@ -101,3 +113,19 @@ def reject_lawyer_request(user_id: str, db: Session = Depends(get_db)) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.get("/{user_id}/enrollment-proof")
+def download_enrollment_proof(user_id: str, db: Session = Depends(get_db)) -> FileResponse:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if not user.enrollment_proof_path:
+        raise HTTPException(status_code=404, detail="Enrollment proof is not available.")
+    local_path = get_storage().ensure_local_path(user.enrollment_proof_path)
+    if not local_path.exists():
+        raise HTTPException(status_code=404, detail="Enrollment proof file is missing.")
+    suffix = Path(local_path.name).suffix.lower()
+    media_type = PROOF_MEDIA_TYPES.get(suffix, "application/octet-stream")
+    filename = f"enrollment-proof-{user.enrollment_number or user.id}{suffix}"
+    return FileResponse(path=local_path, media_type=media_type, filename=filename)

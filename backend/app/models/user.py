@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Enum, String
+from sqlalchemy import Boolean, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.roles import UserRole
@@ -21,6 +21,7 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Enum(UserRole, name="user_role"), default=UserRole.GENERAL_USER, nullable=False
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     lawyer_request_status: Mapped[str] = mapped_column(
         String(32), default=LAWYER_REQUEST_NONE, nullable=False, index=True
     )
