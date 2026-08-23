@@ -31,6 +31,12 @@ class LegalActRead(BaseModel):
     updated_at: datetime
 
 
+class LegalActBrowseRead(LegalActRead):
+    verified_section_count: int
+    verified_reference_count: int
+    last_verified_at: datetime | None
+
+
 class LegalActDetail(LegalActRead):
     raw_text: str | None = None
 

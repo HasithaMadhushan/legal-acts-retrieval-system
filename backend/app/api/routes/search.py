@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -25,6 +25,7 @@ def search_endpoint(
     relationship_type: RelationshipType | None = None,
     verification_status: VerificationStatus | None = None,
     mapped_status: Literal["mapped", "unresolved"] | None = None,
+    search_mode: Literal["all", "keyword", "semantic"] = "all",
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     role_view: str | None = None,
@@ -33,6 +34,11 @@ def search_endpoint(
 ) -> SearchResponse:
     query = q.strip()
     ensure_no_legal_advice_query(query)
+    if search_mode == "semantic":
+        raise HTTPException(
+            status_code=501,
+            detail="Semantic search is not available yet. Use Keyword or All methods.",
+        )
     return search(
         db,
         query=query,

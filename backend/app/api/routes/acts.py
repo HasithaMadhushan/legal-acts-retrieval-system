@@ -16,6 +16,7 @@ from app.models.legal_reference import LegalReference
 from app.models.processing_job import ProcessingJob
 from app.models.user import User
 from app.schemas.legal_act import (
+    LegalActBrowseRead,
     LegalActDetail,
     LegalActRead,
     LegalActUpdate,
@@ -53,9 +54,49 @@ def list_acts(
     return query.order_by(LegalAct.uploaded_at.desc()).all()
 
 
+def _browse_entry(db: Session, act: LegalAct) -> LegalActBrowseRead:
+    verified_sections = (
+        db.query(ActSection)
+        .filter(
+            ActSection.act_id == act.id,
+            ActSection.verification_status == VerificationStatus.VERIFIED,
+        )
+        .count()
+    )
+    verified_references = (
+        db.query(LegalReference)
+        .filter(
+            LegalReference.source_act_id == act.id,
+            LegalReference.verification_status == VerificationStatus.VERIFIED,
+        )
+        .count()
+    )
+    last_verified_at = (
+        act.updated_at if act.processing_status == ProcessingStatus.VERIFIED else None
+    )
+    return LegalActBrowseRead(
+        **LegalActRead.model_validate(act).model_dump(),
+        verified_section_count=verified_sections,
+        verified_reference_count=verified_references,
+        last_verified_at=last_verified_at,
+    )
+
+
+@router.get("/browse", response_model=list[LegalActBrowseRead])
+def browse_acts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[LegalActBrowseRead]:
+    acts = list_acts(db=db, current_user=current_user)
+    return [_browse_entry(db, act) for act in acts]
+
+
 @router.post("/upload", response_model=LegalActRead, status_code=201)
 def upload_act(
     file: UploadFile = File(...),
+    title: str | None = Form(default=None),
+    act_number: str | None = Form(default=None),
+    year: int | None = Form(default=None),
     category: str | None = Form(default=None),
     source_name: str | None = Form(default=None),
     source_url: str | None = Form(default=None),
@@ -89,10 +130,12 @@ def upload_act(
     stored_name = f"{uuid4()}.pdf"
     stored_key = get_storage().save(stored_name, content)
 
-    title = source_name_safe.rsplit(".", 1)[0].replace("_", " ")
+    title_value = (title or "").strip() or source_name_safe.rsplit(".", 1)[0].replace("_", " ")
     act = LegalAct(
-        title=title,
-        normalized_title=normalize_for_search(title),
+        title=title_value,
+        normalized_title=normalize_for_search(title_value),
+        act_number=(act_number or "").strip() or None,
+        year=year,
         category=category,
         source_name=source_name,
         source_url=source_url,
