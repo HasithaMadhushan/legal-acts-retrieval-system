@@ -1,7 +1,0 @@
-{
-  "sonarlint.connectedMode.project": {
-    "connectionId": "SonarQubeCloud",
-    "projectKey": "HasithaMadhushan_legal-acts-retrieval-system"
-  },
-  "sonarlint.focusOnNewCode": true
-}
