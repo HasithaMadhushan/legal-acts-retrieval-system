@@ -5,12 +5,10 @@ services:
       POSTGRES_DB: legal_acts
       POSTGRES_USER: legal_acts
       POSTGRES_PASSWORD: legal_acts
-    # Bound to localhost only, here and below: this compose file is also used
-    # as the base for docker-compose.prod.yml, and services should never be
-    # reachable from outside the host directly -- only via a reverse proxy
-    # (see deploy/Caddyfile.example) or, for local dev, other host tooling.
-    ports:
-      - "127.0.0.1:5432:5432"
+    # No host port mapping: a system PostgreSQL often occupies 127.0.0.1:5432,
+    # which would make `docker compose up` fail with "address already in use".
+    # The backend reaches this service over the compose network as hostname
+    # "db"; use `docker compose exec db psql ...` for ad-hoc access.
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
