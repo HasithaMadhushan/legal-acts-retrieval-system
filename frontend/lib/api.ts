@@ -74,7 +74,6 @@ export async function register(payload: {
   email: string;
   password: string;
   full_name?: string;
-  account_type?: "general" | "attorney";
 }) {
   return apiFetch<User>("/auth/register", {
     method: "POST",
@@ -87,7 +86,7 @@ export async function submitLawyerVerification(formData: FormData) {
 }
 
 export async function forgotPassword(email: string) {
-  return apiFetch<{ detail: string; reset_token?: string; reset_url?: string }>("/auth/forgot-password", {
+  return apiFetch<{ detail: string }>("/auth/forgot-password", {
     method: "POST",
     body: JSON.stringify({ email })
   });

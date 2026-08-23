@@ -49,6 +49,21 @@ export function canAccessRoute(pathname: string, role: Role | null) {
 export function safeNextPath(nextPath: string | null, fallback: string) {
   if (!nextPath) return fallback;
   if (!nextPath.startsWith("/") || nextPath.startsWith("//")) return fallback;
+  if (nextPath.includes("\\") || nextPath.includes("@") || /\s/.test(nextPath)) {
+    return fallback;
+  }
+  try {
+    const decoded = decodeURIComponent(nextPath);
+    if (
+      decoded.startsWith("//") ||
+      decoded.includes("\\") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(decoded)
+    ) {
+      return fallback;
+    }
+  } catch {
+    return fallback;
+  }
   return nextPath;
 }
 

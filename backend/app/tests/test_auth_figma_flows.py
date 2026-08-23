@@ -9,7 +9,6 @@ def test_register_derives_full_name_and_stays_general_user(client):
         json={
             "email": "new.reader@example.com",
             "password": "SecurePass1",
-            "account_type": "general",
         },
     )
     assert response.status_code == 201
@@ -56,7 +55,6 @@ def test_lawyer_verification_stays_general_until_admin_approves(client, admin_to
         json={
             "email": "counsel@example.com",
             "password": "CounselPass1",
-            "account_type": "attorney",
         },
     )
     assert register.status_code == 201
@@ -136,6 +134,15 @@ def test_admin_can_reject_lawyer_request(client, admin_token):
 
 
 def test_forgot_and_reset_password(client):
+    import hashlib
+    import secrets
+    from datetime import timedelta
+
+    from app.core.security import utc_now_naive
+    from app.db.session import SessionLocal
+    from app.models.password_reset_token import PasswordResetToken
+    from app.models.user import User
+
     login_before = client.post(
         "/api/v1/auth/login",
         json={"email": "user@example.com", "password": "UserPass123!"},
@@ -148,13 +155,24 @@ def test_forgot_and_reset_password(client):
         json={"email": "user@example.com"},
     )
     assert forgot.status_code == 200
-    token = forgot.json()["reset_token"]
-    assert token
-    assert "/reset-password?token=" in forgot.json()["reset_url"]
+    assert "reset_token" not in forgot.json()
+    assert "reset_url" not in forgot.json()
+
+    raw_token = secrets.token_urlsafe(32)
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.email == "user@example.com").one()
+        db.add(
+            PasswordResetToken(
+                user_id=user.id,
+                token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+                expires_at=utc_now_naive() + timedelta(minutes=60),
+            )
+        )
+        db.commit()
 
     reset = client.post(
         "/api/v1/auth/reset-password",
-        json={"token": token, "password": "BrandNewPass1"},
+        json={"token": raw_token, "password": "BrandNewPass1"},
     )
     assert reset.status_code == 200
 
@@ -175,27 +193,35 @@ def test_forgot_and_reset_password(client):
 
     reused = client.post(
         "/api/v1/auth/reset-password",
-        json={"token": token, "password": "AnotherPass1"},
+        json={"token": raw_token, "password": "AnotherPass1"},
     )
     assert reused.status_code == 400
 
 
-def test_forgot_password_hides_token_outside_development(client, monkeypatch):
+def test_forgot_password_never_returns_reset_secrets(client, monkeypatch):
     from app.core.config import get_settings
 
-    monkeypatch.setenv("ENVIRONMENT", "staging")
-    get_settings.cache_clear()
-    try:
-        response = client.post(
-            "/api/v1/auth/forgot-password",
-            json={"email": "user@example.com"},
-        )
-        assert response.status_code == 200
-        assert "reset_token" not in response.json()
-        assert "reset_url" not in response.json()
-    finally:
-        monkeypatch.setenv("ENVIRONMENT", "development")
-        get_settings.cache_clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "environment", "development")
+    response = client.post(
+        "/api/v1/auth/forgot-password",
+        json={"email": "user@example.com"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "detail": "If that email is registered, a password reset link will be issued."
+    }
+    assert "reset_token" not in response.json()
+    assert "reset_url" not in response.json()
+
+    monkeypatch.setattr(settings, "environment", "staging")
+    staging = client.post(
+        "/api/v1/auth/forgot-password",
+        json={"email": "user@example.com"},
+    )
+    assert staging.status_code == 200
+    assert "reset_token" not in staging.json()
+    assert "reset_url" not in staging.json()
 
 
 def test_forgot_password_unknown_email_does_not_leak(client):

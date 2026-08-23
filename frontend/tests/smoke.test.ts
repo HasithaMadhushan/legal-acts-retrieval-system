@@ -36,6 +36,7 @@ describe("frontend role and safety smoke checks", () => {
   it("rejects open redirects in login next paths", () => {
     expect(safeNextPath("/search", "/dashboard")).toBe("/search");
     expect(safeNextPath("//evil.com", "/dashboard")).toBe("/dashboard");
+    expect(safeNextPath("/\\evil.com", "/dashboard")).toBe("/dashboard");
     expect(safeNextPath("https://evil.com", "/dashboard")).toBe("/dashboard");
     expect(safeNextPath(null, "/dashboard")).toBe("/dashboard");
   });

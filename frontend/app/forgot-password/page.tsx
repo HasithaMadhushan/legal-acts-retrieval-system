@@ -14,7 +14,6 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [detail, setDetail] = useState("");
-  const [resetUrl, setResetUrl] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -23,7 +22,6 @@ export default function ForgotPasswordPage() {
     try {
       const response = await forgotPassword(email);
       setDetail(response.detail);
-      setResetUrl(response.reset_url ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to request a reset.");
     } finally {
@@ -37,7 +35,7 @@ export default function ForgotPasswordPage() {
       title="Forgot password"
       description="If the email is registered, a one-time reset link will be issued."
       marketingTitle="Recover access to the gazette."
-      marketingBody="Request a reset for a registered account. In this academic deployment the link is shown in development instead of being emailed. This system does not provide legal advice."
+      marketingBody="Request a reset for a registered account. In local development the reset URL is written to the API server logs instead of being emailed. This system does not provide legal advice."
     >
       <form className="flex flex-col gap-5" onSubmit={submit}>
         <FieldGroup>
@@ -48,18 +46,9 @@ export default function ForgotPasswordPage() {
           ) : null}
           {detail ? (
             <Alert>
-              <AlertTitle>Check the issued link</AlertTitle>
+              <AlertTitle>Request received</AlertTitle>
               <AlertDescription>
-                {detail}
-                {resetUrl ? (
-                  <>
-                    {" "}
-                    Development reset URL:{" "}
-                    <Link href={resetUrl} className="underline">
-                      Open reset page
-                    </Link>
-                  </>
-                ) : null}
+                {detail} In development, check the API server logs for the reset URL.
               </AlertDescription>
             </Alert>
           ) : null}

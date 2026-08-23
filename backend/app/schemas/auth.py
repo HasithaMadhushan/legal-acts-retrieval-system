@@ -1,6 +1,4 @@
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.core.passwords import PASSWORD_REQUIREMENT, password_meets_policy
 from app.core.roles import UserRole
@@ -16,7 +14,6 @@ class RegisterRequest(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=255)
     email: EmailStr
     password: str = Field(min_length=8)
-    account_type: Literal["general", "attorney"] = "general"
 
     @field_validator("password")
     @classmethod
@@ -49,11 +46,7 @@ class ForgotPasswordRequest(BaseModel):
 
 
 class ForgotPasswordResponse(BaseModel):
-    model_config = ConfigDict(exclude_none=True)
-
     detail: str
-    reset_token: str | None = None
-    reset_url: str | None = None
 
 
 class ResetPasswordRequest(BaseModel):
