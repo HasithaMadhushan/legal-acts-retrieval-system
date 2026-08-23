@@ -44,7 +44,14 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     let detail = `Request failed with status ${response.status}`;
     try {
       const data = await response.json();
-      detail = data.detail ?? detail;
+      if (Array.isArray(data.detail)) {
+        detail = data.detail
+          .map((item: { msg?: string } | string) => (typeof item === "string" ? item : item.msg ?? ""))
+          .filter(Boolean)
+          .join(" ");
+      } else {
+        detail = data.detail ?? detail;
+      }
     } catch {
       // Keep fallback detail.
     }
@@ -56,18 +63,49 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   return response.json() as Promise<T>;
 }
 
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string, rememberMe = false) {
   return apiFetch<{ access_token: string; role: Role; disclaimer: string }>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password })
+    body: JSON.stringify({ email, password, remember_me: rememberMe })
   });
 }
 
-export async function register(full_name: string, email: string, password: string) {
+export async function register(payload: {
+  email: string;
+  password: string;
+  full_name?: string;
+  account_type?: "general" | "attorney";
+}) {
   return apiFetch<User>("/auth/register", {
     method: "POST",
-    body: JSON.stringify({ full_name, email, password })
+    body: JSON.stringify(payload)
   });
+}
+
+export async function submitLawyerVerification(formData: FormData) {
+  return apiFetch<User>("/auth/lawyer-verification", { method: "POST", body: formData });
+}
+
+export async function forgotPassword(email: string) {
+  return apiFetch<{ detail: string; reset_token?: string; reset_url?: string }>("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email })
+  });
+}
+
+export async function resetPassword(token: string, password: string) {
+  return apiFetch<{ detail: string }>("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, password })
+  });
+}
+
+export async function approveLawyerRequest(userId: string) {
+  return apiFetch<User>(`/users/${userId}/lawyer-requests/approve`, { method: "POST" });
+}
+
+export async function rejectLawyerRequest(userId: string) {
+  return apiFetch<User>(`/users/${userId}/lawyer-requests/reject`, { method: "POST" });
 }
 
 export async function me() {

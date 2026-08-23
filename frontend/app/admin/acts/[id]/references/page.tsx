@@ -17,7 +17,6 @@ import type {
   RelationshipType,
   VerificationStatus
 } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { ReferenceTable } from "@/components/reference-table";
 import { RoleGuard } from "@/components/role-guard";
 
@@ -154,7 +153,6 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
   return (
     <RoleGuard allowed={["ADMIN"]} path="/admin/acts">
       <div className="grid">
-        <LegalDisclaimer />
         <section className="panel">
           <h1>Review detected references</h1>
           <p className="muted">References stay pending or need review until an Admin verifies or rejects them.</p>

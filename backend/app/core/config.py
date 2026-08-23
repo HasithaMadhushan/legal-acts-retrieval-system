@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./legal_acts.db"
     secret_key: str = DEFAULT_DEV_SECRET_KEY
     access_token_expire_minutes: int = 480
+    remember_me_expire_minutes: int = 60 * 24 * 30
+    frontend_url: str = "http://localhost:3000"
+    password_reset_expire_minutes: int = 60
     upload_dir: str = "uploads"
     max_upload_size_mb: int = 50
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"

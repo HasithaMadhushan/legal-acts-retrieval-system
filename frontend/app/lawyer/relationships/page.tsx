@@ -18,7 +18,6 @@ import type {
   SavedItem,
   VerificationStatus
 } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { RelationshipGraph } from "@/components/relationship-graph";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
@@ -148,7 +147,6 @@ export default function LawyerRelationshipsPage() {
   return (
     <RoleGuard allowed={["ADMIN", "LAWYER"]} path="/lawyer/relationships">
       <div className="grid">
-        <LegalDisclaimer />
         <form className="panel" onSubmit={submit}>
           <h1>Relationship explorer</h1>
           <p className="muted">

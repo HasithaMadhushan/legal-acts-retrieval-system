@@ -1,10 +1,8 @@
 import Link from "next/link";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 
 export default function HomePage() {
   return (
     <div className="grid">
-      <LegalDisclaimer />
       <section className="panel">
         <h1 className="page-title">Automated Legal Acts Retrieval System</h1>
         <p className="muted">
