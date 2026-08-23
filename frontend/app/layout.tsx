@@ -15,7 +15,7 @@ const newsreader = Newsreader({
 });
 
 export const metadata: Metadata = {
-  title: "Legal Acts Retrieval System",
+  title: "LexAtlas — Statute & citation retrieval",
   description: "Search and browse verified Sri Lankan Legal Acts",
 };
 

@@ -3,49 +3,66 @@ import { cn } from "@/lib/utils";
 type LexAtlasMarkProps = Readonly<{
   inverted?: boolean;
   className?: string;
+  /** Compact mark for dark sidebar (Figma Brand/Sidebar). */
+  sidebar?: boolean;
 }>;
 
-export function LexAtlasMark({ inverted = false, className }: LexAtlasMarkProps) {
+export function LexAtlasMark({
+  inverted = false,
+  className,
+  sidebar = false
+}: LexAtlasMarkProps) {
+  const light = inverted || sidebar;
   return (
     <div className={cn("flex items-center gap-3", className)}>
-      <svg viewBox="0 0 48 48" className="size-10 shrink-0" aria-hidden="true">
-        <circle
-          cx="24"
-          cy="24"
-          r="22"
-          fill="none"
-          className={inverted ? "stroke-ring" : "stroke-primary"}
-          strokeWidth="1.5"
+      <svg viewBox="0 0 40 40" className="size-10 shrink-0" aria-hidden="true">
+        <rect
+          x="0.75"
+          y="0.75"
+          width="38.5"
+          height="38.5"
+          rx="3"
+          fill={sidebar ? "#10243a" : "none"}
+          className={light ? "stroke-[color:var(--gold)]" : "stroke-primary"}
+          strokeWidth="1.25"
         />
-        <circle
-          cx="24"
-          cy="24"
-          r="17"
+        <rect
+          x="2.5"
+          y="2.5"
+          width="35"
+          height="35"
+          rx="1.5"
           fill="none"
-          className={inverted ? "stroke-ring/70" : "stroke-ring"}
+          className={light ? "stroke-[color:var(--gold)]" : "stroke-ring"}
           strokeWidth="1"
         />
-        <path
-          d="M16 31V17h5.2c2.8 0 4.4 1.5 4.4 3.7 0 1.5-.8 2.7-2.2 3.3 1.7.5 2.7 1.8 2.7 3.6 0 2.4-1.8 4.4-5.1 4.4H16zm3.2-8.2h1.7c1.3 0 2-.6 2-1.6s-.7-1.5-2-1.5h-1.7v3.1zm0 2.3V28h2.1c1.5 0 2.3-.7 2.3-1.8s-.8-1.8-2.4-1.8h-2zM32.8 17l-4.6 14h-3.3l-4.6-14h3.4l3 9.8 3-9.8h3.1z"
-          className={inverted ? "fill-primary-foreground" : "fill-primary"}
-        />
+        {/* Column + open statute book mark (Figma Logo/Mark) */}
+        <rect x="12.75" y="10.75" width="2" height="16" fill={light ? "#f4efe4" : "#1e3a5f"} />
+        <rect x="22.75" y="10.75" width="2" height="16" fill={light ? "#f4efe4" : "#1e3a5f"} />
+        <rect x="10.75" y="8.75" width="16" height="2" fill="#c6a15b" />
+        <rect x="11.75" y="7.25" width="14" height="1.5" fill={light ? "#f4efe4" : "#fcfaf4"} />
+        <rect x="11.75" y="25.75" width="14" height="2.5" fill="#c6a15b" />
+        <ellipse cx="14.75" cy="22.75" rx="7" ry="4" fill={sidebar ? "#10243a" : "#1e3a5f"} />
+        <ellipse cx="22.75" cy="22.75" rx="7" ry="4" fill={sidebar ? "#10243a" : "#1e3a5f"} />
+        <rect x="7.75" y="18.75" width="22" height="5" fill={sidebar ? "#10243a" : "#10243a"} />
+        <rect x="18.15" y="19.75" width="1.2" height="6" fill={light ? "#f4efe4" : "#fcfaf4"} />
       </svg>
-      <div className="flex flex-col leading-none">
+      <div className="flex min-w-0 flex-col gap-0.5 leading-none">
         <span
           className={cn(
-            "font-serif text-xl tracking-tight",
-            inverted ? "text-primary-foreground" : "text-foreground"
+            "font-serif text-xl font-semibold tracking-tight",
+            light ? "text-[#f4efe4]" : "text-foreground"
           )}
         >
           LexAtlas
         </span>
         <span
           className={cn(
-            "mt-1 text-[0.65rem] tracking-[0.22em] uppercase",
-            inverted ? "text-ring" : "text-muted-foreground"
+            "text-[11px] font-medium tracking-[0.02em]",
+            light ? "text-[color:var(--gold)]" : "text-muted-foreground"
           )}
         >
-          Legal acts retrieval
+          {sidebar ? "Statute & citation retrieval" : "Legal acts retrieval"}
         </span>
       </div>
     </div>

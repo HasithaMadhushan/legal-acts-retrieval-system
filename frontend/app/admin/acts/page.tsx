@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { listActs, processAct } from "@/lib/api";
-import type { LegalAct } from "@/lib/types";
+import { getEvaluationMetricsSummary, listActs, processAct } from "@/lib/api";
+import type { EvaluationMetricsSummary, LegalAct } from "@/lib/types";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
 
@@ -16,12 +16,15 @@ function sleep(ms: number) {
 
 export default function AdminActsPage() {
   const [acts, setActs] = useState<LegalAct[]>([]);
+  const [metrics, setMetrics] = useState<EvaluationMetricsSummary | null>(null);
   const [error, setError] = useState("");
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
 
   async function load() {
     try {
-      setActs(await listActs());
+      const [actsData, metricsData] = await Promise.all([listActs(), getEvaluationMetricsSummary()]);
+      setActs(actsData);
+      setMetrics(metricsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load Acts.");
     }
@@ -81,6 +84,17 @@ export default function AdminActsPage() {
             <h1 className="page-title">Admin Acts</h1>
             <Link className="button" href="/admin/acts/upload">Upload Act PDF</Link>
           </div>
+          {metrics ? (
+            <div className="grid two">
+              <RegistryStatCard title="Acts" value={metrics.document_counts.total ?? acts.length} />
+              <RegistryStatCard title="Verified sections" value={metrics.section_counts.verified ?? 0} />
+              <RegistryStatCard title="Verified refs" value={metrics.reference_counts.verified ?? 0} />
+              <RegistryStatCard
+                title="Needs review"
+                value={(metrics.section_counts.needs_review ?? 0) + (metrics.reference_counts.needs_review ?? 0)}
+              />
+            </div>
+          ) : null}
           {error ? <p className="error">{error}</p> : null}
           <div className="table-wrap">
             <table>
@@ -120,5 +134,14 @@ export default function AdminActsPage() {
         </section>
       </div>
     </RoleGuard>
+  );
+}
+
+function RegistryStatCard({ title, value }: { title: string; value: number }) {
+  return (
+    <article className="panel">
+      <p className="text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">{title}</p>
+      <p className="mt-2 font-serif text-3xl font-semibold text-foreground">{value}</p>
+    </article>
   );
 }

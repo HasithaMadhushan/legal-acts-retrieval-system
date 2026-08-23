@@ -17,6 +17,8 @@ import type {
   SavedItemListResponse,
   SearchResponse,
   Section,
+  ReadingHistoryItem,
+  LegalActBrowse,
   User,
   VerificationSummary
 } from "@/lib/types";
@@ -113,6 +115,27 @@ export async function me() {
 
 export async function listActs() {
   return apiFetch<LegalAct[]>("/acts");
+}
+
+export async function listActsBrowse() {
+  return apiFetch<LegalActBrowse[]>("/acts/browse");
+}
+
+export async function listReadingHistory(limit = 20) {
+  return apiFetch<{ items: ReadingHistoryItem[]; total_results: number }>(
+    `/reading-history?limit=${limit}`
+  );
+}
+
+export async function recordReadingHistory(payload: {
+  item_type: "ACT" | "SECTION";
+  act_id: string;
+  section_id?: string | null;
+}) {
+  return apiFetch<ReadingHistoryItem>("/reading-history", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function getAct(id: string) {

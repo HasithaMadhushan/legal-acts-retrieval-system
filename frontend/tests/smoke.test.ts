@@ -41,6 +41,22 @@ describe("frontend role and safety smoke checks", () => {
     expect(safeNextPath(null, "/dashboard")).toBe("/dashboard");
   });
 
+  it("LexAtlas shell uses Brand/Sidebar chrome and maps Dashboard to Recent", () => {
+    const shell = readFileSync("components/app-shell.tsx", "utf8");
+    const mark = readFileSync("components/auth/lexatlas-mark.tsx", "utf8");
+    const layout = readFileSync("app/layout.tsx", "utf8");
+    expect(shell).toContain("w-[248px]");
+    expect(shell).toContain('label: "Recent"');
+    expect(shell).toContain("Sign out");
+    expect(shell).toContain("bg-[color:var(--burgundy)]");
+    expect(shell).toContain("bg-[color:var(--gold)]");
+    expect(shell).toContain("LexAtlasMark sidebar");
+    expect(shell).toContain("md:hidden");
+    expect(mark).toContain("Statute & citation retrieval");
+    expect(mark).toContain("sidebar");
+    expect(layout).toContain("LexAtlas — Statute & citation retrieval");
+  });
+
   it("register page exposes account type and attorney verification copy", () => {
     const registerPage = readFileSync("app/register/page.tsx", "utf8");
     const attorneyPage = readFileSync("app/register/attorney-verification/page.tsx", "utf8");
@@ -70,12 +86,12 @@ describe("frontend role and safety smoke checks", () => {
     expect(loginPage).not.toContain("AdminPass123!");
     expect(loginPage).not.toContain("LawyerPass123!");
     expect(loginPage).not.toContain("UserPass123!");
-    expect(searchPage).toContain("Search verified legal information");
-    expect(searchPage).toContain("Category");
-    expect(searchPage).toContain("Relationship type");
-    expect(searchPage).not.toContain("Mapped status");
+    expect(searchPage).toContain("Search");
+    expect(searchPage).toContain("search_mode");
+    expect(searchPage).toContain("verification_status");
+    expect(searchPage).toContain("All methods");
+    expect(searchPage).toContain("Verified only");
     expect(searchPage).toContain("No verified results are available");
-    expect(searchPage).toContain("reviewed mapped relationships");
     expect(lawyerSearchPage).toContain("Processing status");
     expect(lawyerSearchPage).toContain("Verification status");
     expect(lawyerSearchPage).toContain("Previous page");
@@ -88,22 +104,26 @@ describe("frontend role and safety smoke checks", () => {
     expect(searchResults).toContain("Unsave from workspace");
   });
 
-  it("general user home dashboard and browse pages are simplified and verified-only", () => {
+  it("general user home dashboard and browse pages match LexAtlas Figma flows", () => {
     const homePage = readFileSync("app/page.tsx", "utf8");
     const dashboardPage = readFileSync("app/dashboard/page.tsx", "utf8");
     const browsePage = readFileSync("app/browse/page.tsx", "utf8");
-    expect(homePage).toContain("Browse Acts");
-    expect(homePage).toContain("Verified information retrieval");
-    expect(homePage).toContain("does not explain legal meaning");
-    expect(dashboardPage).toContain("General Users can search and browse verified legal information only");
-    expect(dashboardPage).toContain("Search verified information");
-    expect(dashboardPage).toContain("Browse Acts");
-    expect(browsePage).toContain("Browse verified Acts");
-    expect(browsePage).toContain("General Users see verified information");
-    expect(browsePage).toContain("No verified Acts are available");
-    expect(browsePage).not.toContain("LegalDisclaimer");
-    expect(browsePage).not.toContain("Upload");
-    expect(browsePage).not.toContain("Workspace");
+    const actPage = readFileSync("app/acts/[id]/page.tsx", "utf8");
+    const sectionPage = readFileSync("app/sections/[id]/page.tsx", "utf8");
+    expect(homePage).toContain("Find the statute");
+    expect(homePage).toContain("Search Acts");
+    expect(homePage).toContain("Recently verified");
+    expect(homePage).toContain("listActsBrowse");
+    expect(dashboardPage).toContain("Recent reading");
+    expect(dashboardPage).toContain("Continue reading");
+    expect(dashboardPage).toContain("listReadingHistory");
+    expect(browsePage).toContain("Browse Acts");
+    expect(browsePage).toContain("Showing");
+    expect(browsePage).toContain("Show more Acts");
+    expect(actPage).toContain("Overview");
+    expect(actPage).toContain("Mapped references");
+    expect(sectionPage).toContain("Reference evidence");
+    expect(sectionPage).toContain("Mapped references");
   });
 
   it("admin upload and document list expose upload metadata copy", () => {
@@ -111,6 +131,11 @@ describe("frontend role and safety smoke checks", () => {
     const adminActsPage = readFileSync("app/admin/acts/page.tsx", "utf8");
     expect(uploadDropzone).toContain("PDF only, maximum");
     expect(uploadDropzone).toContain("The selected file is not reported as a PDF");
+    expect(uploadDropzone).toContain("Optional title");
+    expect(uploadDropzone).toContain("Optional Act number");
+    expect(uploadDropzone).toContain("Optional year");
+    expect(adminActsPage).toContain("RegistryStatCard");
+    expect(adminActsPage).toContain("Verified sections");
     expect(adminActsPage).toContain("Source file");
     expect(adminActsPage).toContain("Uploaded");
   });
@@ -172,6 +197,7 @@ describe("frontend role and safety smoke checks", () => {
   it("admin evaluation page exposes metrics, mismatches, and safety text", () => {
     const evaluationPage = readFileSync("app/admin/evaluation/page.tsx", "utf8");
     expect(evaluationPage).toContain("Evaluation and demo readiness");
+    expect(evaluationPage).toContain("Recall is the primary metric");
     expect(evaluationPage).toContain("MetricsPanel");
     expect(evaluationPage).toContain("Documents");
     expect(evaluationPage).toContain("Processing jobs");
@@ -206,13 +232,16 @@ describe("frontend role and safety smoke checks", () => {
     expect(sectionDetailPage).toContain("Open relationship explorer");
   });
 
-  it("general Act and section detail pages use verified relationship previews", () => {
+  it("general Act and section detail pages use Figma tabs and reference panels", () => {
     const actDetailPage = readFileSync("app/acts/[id]/page.tsx", "utf8");
     const sectionDetailPage = readFileSync("app/sections/[id]/page.tsx", "utf8");
     const preview = readFileSync("components/verified-relationship-preview.tsx", "utf8");
-    expect(actDetailPage).toContain("Verified sections");
-    expect(actDetailPage).toContain("Verified relationship preview");
-    expect(sectionDetailPage).toContain("Verified references from this section");
+    expect(actDetailPage).toContain("Sections");
+    expect(actDetailPage).toContain("Mapped references");
+    expect(actDetailPage).toContain("OfficialSourceBlock");
+    expect(sectionDetailPage).toContain("Mapped references");
+    expect(sectionDetailPage).toContain("Reference evidence");
+    expect(sectionDetailPage).toContain("Statute text");
     expect(preview).toContain("No verified relationships are available yet.");
     expect(preview).toContain("information retrieval only");
     expect(preview).not.toContain("Correct reference");
