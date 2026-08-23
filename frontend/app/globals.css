@@ -107,63 +107,8 @@ textarea {
   opacity: 0.55;
 }
 
-.shell {
-  display: grid;
-  grid-template-columns: 250px minmax(0, 1fr);
-  min-height: 100vh;
-}
-
-.sidebar {
-  background: var(--sidebar);
-  color: var(--sidebar-foreground);
-  padding: 1rem;
-  border-right: 3px solid var(--gold);
-}
-
-.brand {
-  font-size: 1.05rem;
-  font-weight: 800;
-  line-height: 1.25;
-  margin: 0 0 1rem;
-}
-
-.nav {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.nav a,
-.nav button {
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: white;
-  justify-content: flex-start;
-  padding: 0.55rem 0.65rem;
-  text-align: left;
-  text-decoration: none;
-}
-
-.nav a:hover,
-.nav button:hover {
-  background: rgba(255, 255, 255, 0.11);
-}
-
-.content {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  min-width: 0;
-}
-
-.topbar {
-  align-items: center;
-  background: white;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  padding: 0.8rem 1.2rem;
-}
+/* Legacy .shell layout retained for page content helpers inside main.
+ * Chrome (sidebar/topbar) is LexAtlas Tailwind in app-shell.tsx. */
 
 .main {
   margin: 0 auto;

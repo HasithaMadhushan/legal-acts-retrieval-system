@@ -51,6 +51,26 @@ export interface LegalAct {
   updated_at: string;
 }
 
+export interface LegalActBrowse extends LegalAct {
+  verified_section_count: number;
+  verified_reference_count: number;
+  last_verified_at: string | null;
+}
+
+export interface ReadingHistoryItem {
+  id: string;
+  item_type: "ACT" | "SECTION";
+  act_id: string;
+  section_id: string | null;
+  viewed_at: string;
+  act_title: string;
+  act_number: string | null;
+  act_year: number | null;
+  section_number: string | null;
+  section_heading: string | null;
+  href: string;
+}
+
 export interface ProcessingSummary {
   parser_requested?: string | null;
   parser_used?: string | null;

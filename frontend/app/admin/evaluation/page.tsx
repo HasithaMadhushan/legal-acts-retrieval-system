@@ -101,7 +101,8 @@ export default function AdminEvaluationPage() {
         <section className="panel">
           <h1>Evaluation and demo readiness</h1>
           <p className="muted">
-            Metrics are deterministic counts and gold-reference comparisons for academic evaluation only. They are not legal conclusions.
+            Recall is the primary metric for reference extraction completeness in this academic prototype.
+            Precision and F1 support diagnosis but are not legal conclusions.
           </p>
           {loading ? <p>Loading evaluation metrics...</p> : null}
           {error ? <p className="error">{error}</p> : null}
@@ -224,8 +225,8 @@ function EvaluationRunPanel({ run }: { run: EvaluationRun }) {
     <section className="panel">
       <h2>{run.run_name}</h2>
       <div className="toolbar">
+        <span><strong>Recall:</strong> {formatPercent(run.recall)}</span>
         <span>Precision: {formatPercent(run.precision)}</span>
-        <span>Recall: {formatPercent(run.recall)}</span>
         <span>F1-score: {formatPercent(run.f1_score)}</span>
         <span>Gold references: {run.total_gold_references}</span>
         <span>TP/FP/FN: {run.true_positives}/{run.false_positives}/{run.false_negatives}</span>

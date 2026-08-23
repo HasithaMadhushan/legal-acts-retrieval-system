@@ -13,6 +13,7 @@ os.environ["AUTO_MIGRATE_ON_STARTUP"] = "false"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import pytest
+import app.models  # noqa: F401 — register SQLAlchemy models for metadata
 from fastapi.testclient import TestClient
 
 from app.db.base import Base

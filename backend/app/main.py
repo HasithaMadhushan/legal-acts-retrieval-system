@@ -17,6 +17,7 @@ from app.api.routes import (
     auth,
     evaluation,
     exports,
+    reading_history,
     references,
     relationships,
     saved_items,
@@ -150,5 +151,6 @@ app.include_router(references.router, prefix=api_prefix)
 app.include_router(search.router, prefix=api_prefix)
 app.include_router(relationships.router, prefix=api_prefix)
 app.include_router(saved_items.router, prefix=api_prefix)
+app.include_router(reading_history.router, prefix=api_prefix)
 app.include_router(exports.router, prefix=api_prefix)
 app.include_router(evaluation.router, prefix=api_prefix)
