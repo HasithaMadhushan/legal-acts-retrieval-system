@@ -8,6 +8,17 @@ const DEFAULT_MARKETING_TITLE = "Retrieve verified Acts with mapped references."
 const DEFAULT_MARKETING_BODY =
   "LexAtlas is an academic information retrieval prototype for certified Sri Lankan Acts. Search the gazette corpus and inspect mapped relationships. It does not provide legal advice.";
 
+type AuthLayoutProps = Readonly<{
+  kicker?: string;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  footer?: ReactNode;
+  belowCard?: ReactNode;
+  marketingTitle?: string;
+  marketingBody?: string;
+}>;
+
 export function AuthLayout({
   kicker = "Gazette access",
   title,
@@ -17,16 +28,7 @@ export function AuthLayout({
   belowCard,
   marketingTitle = DEFAULT_MARKETING_TITLE,
   marketingBody = DEFAULT_MARKETING_BODY,
-}: {
-  kicker?: string;
-  title: string;
-  description?: string;
-  children: ReactNode;
-  footer?: ReactNode;
-  belowCard?: ReactNode;
-  marketingTitle?: string;
-  marketingBody?: string;
-}) {
+}: AuthLayoutProps) {
   return (
     <div className="flex min-h-svh flex-col bg-background">
       <div className="h-2 bg-destructive" aria-hidden="true" />

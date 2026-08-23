@@ -4,6 +4,18 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
+type PasswordFieldProps = Readonly<{
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  visible: boolean;
+  onToggle: () => void;
+  placeholder?: string;
+  autoComplete?: string;
+  hint?: string;
+}>;
+
 export function PasswordField({
   id,
   label,
@@ -14,17 +26,7 @@ export function PasswordField({
   placeholder = "Enter password",
   autoComplete,
   hint,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  visible: boolean;
-  onToggle: () => void;
-  placeholder?: string;
-  autoComplete?: string;
-  hint?: string;
-}) {
+}: PasswordFieldProps) {
   return (
     <Field>
       <div className="flex items-center justify-between gap-3">

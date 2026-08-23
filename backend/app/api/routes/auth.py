@@ -1,6 +1,7 @@
 import hashlib
 import secrets
 from datetime import timedelta
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -35,6 +36,9 @@ from app.services.storage import get_storage
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = get_logger(__name__)
 
+DbSession = Annotated[Session, Depends(get_db)]
+CurrentUser = Annotated[User, Depends(get_current_user)]
+
 PROOF_PDF_SIGNATURE = b"%PDF"
 PROOF_JPEG_SIGNATURE = b"\xff\xd8"
 PROOF_PNG_SIGNATURE = b"\x89PNG"
@@ -45,6 +49,13 @@ PROOF_CONTENT_TYPES = {
 }
 RESET_MESSAGE = "If that email is registered, a password reset link will be issued."
 READ_CHUNK_SIZE = 1024 * 64
+LAWYER_VERIFY_RESPONSES = {
+    400: {"description": "Invalid enrollment number, file type, or proof content."},
+    413: {"description": "Proof file exceeds configured upload size limit."},
+}
+RESET_PASSWORD_RESPONSES = {
+    400: {"description": "Reset token is invalid, expired, or already used."},
+}
 
 
 def _hash_reset_token(token: str) -> str:
@@ -83,7 +94,7 @@ def _current_user_payload(user: User) -> CurrentUserResponse:
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 @limiter.limit(auth_rate_limit)
-def register(request: Request, payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
+def register(request: Request, payload: RegisterRequest, db: DbSession) -> User:
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=409, detail="Email is already registered.")
@@ -103,7 +114,7 @@ def register(request: Request, payload: RegisterRequest, db: Session = Depends(g
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit(auth_rate_limit)
-def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(request: Request, payload: LoginRequest, db: DbSession) -> TokenResponse:
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
@@ -135,18 +146,22 @@ def logout() -> dict[str, str]:
 
 
 @router.get("/me", response_model=CurrentUserResponse)
-def me(current_user: User = Depends(get_current_user)) -> CurrentUserResponse:
+def me(current_user: CurrentUser) -> CurrentUserResponse:
     return _current_user_payload(current_user)
 
 
-@router.post("/lawyer-verification", response_model=UserRead)
+@router.post(
+    "/lawyer-verification",
+    response_model=UserRead,
+    responses=LAWYER_VERIFY_RESPONSES,
+)
 @limiter.limit(auth_rate_limit)
 def submit_lawyer_verification(
     request: Request,
-    enrollment_number: str = Form(...),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    enrollment_number: Annotated[str, Form()],
+    file: Annotated[UploadFile, File()],
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> User:
     number = enrollment_number.strip()
     if not number:
@@ -182,12 +197,12 @@ def submit_lawyer_verification(
     return current_user
 
 
-@router.post("/forgot-password", response_model=ForgotPasswordResponse)
+@router.post("/forgot-password")
 @limiter.limit(auth_rate_limit)
 def forgot_password(
     request: Request,
     payload: ForgotPasswordRequest,
-    db: Session = Depends(get_db),
+    db: DbSession,
 ) -> ForgotPasswordResponse:
     user = db.query(User).filter(User.email == payload.email).first()
     if not user or not user.is_active:
@@ -219,12 +234,12 @@ def forgot_password(
     return ForgotPasswordResponse(detail=RESET_MESSAGE)
 
 
-@router.post("/reset-password")
+@router.post("/reset-password", responses=RESET_PASSWORD_RESPONSES)
 @limiter.limit(auth_rate_limit)
 def reset_password(
     request: Request,
     payload: ResetPasswordRequest,
-    db: Session = Depends(get_db),
+    db: DbSession,
 ) -> dict[str, str]:
     token_hash = _hash_reset_token(payload.token)
     record = (

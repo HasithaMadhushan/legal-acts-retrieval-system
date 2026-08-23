@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.core.passwords import PASSWORD_REQUIREMENT, password_meets_policy
+from app.core.passwords import AUTH_CREDENTIAL_POLICY, password_meets_policy
 from app.core.roles import UserRole
 
 
@@ -19,7 +19,7 @@ class RegisterRequest(BaseModel):
     @classmethod
     def validate_password_policy(cls, value: str) -> str:
         if not password_meets_policy(value):
-            raise ValueError(PASSWORD_REQUIREMENT)
+            raise ValueError(AUTH_CREDENTIAL_POLICY)
         return value
 
 
@@ -57,5 +57,5 @@ class ResetPasswordRequest(BaseModel):
     @classmethod
     def validate_password_policy(cls, value: str) -> str:
         if not password_meets_policy(value):
-            raise ValueError(PASSWORD_REQUIREMENT)
+            raise ValueError(AUTH_CREDENTIAL_POLICY)
         return value
