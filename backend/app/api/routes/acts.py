@@ -32,6 +32,34 @@ router = APIRouter(prefix="/acts", tags=["acts"])
 
 PDF_MIME_TYPES = {"application/pdf", "application/octet-stream", ""}
 PDF_SIGNATURE = b"%PDF-"
+ACT_REFERENCED_DETAIL = "Act is referenced by other Acts and cannot be deleted."
+
+
+def _validate_upload_filename(original_name: str) -> str:
+    if "/" in original_name or "\\" in original_name:
+        raise HTTPException(status_code=400, detail="File name must not contain path separators.")
+    source_name_safe = Path(original_name).name
+    if source_name_safe in {"", ".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    if not source_name_safe.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+    return source_name_safe
+
+
+def _read_upload_with_digest(file: UploadFile, limit: int) -> tuple[bytes, str]:
+    hasher = hashlib.sha256()
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = file.file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="PDF exceeds configured upload size limit.")
+        hasher.update(chunk)
+        chunks.append(chunk)
+    return b"".join(chunks), hasher.hexdigest()
 
 
 @router.get("", response_model=list[LegalActRead])
@@ -92,7 +120,12 @@ def browse_acts(
     return [_browse_entry(db, act) for act in acts]
 
 
-@router.post("/upload", response_model=LegalActRead, status_code=201)
+@router.post(
+    "/upload",
+    response_model=LegalActRead,
+    status_code=201,
+    responses={409: {"description": "Duplicate PDF already uploaded"}},
+)
 def upload_act(
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
@@ -105,43 +138,18 @@ def upload_act(
     current_user: User = Depends(require_admin),
 ) -> LegalAct:
     settings = get_settings()
-    original_name = file.filename or "uploaded.pdf"
-    if "/" in original_name or "\\" in original_name:
-        raise HTTPException(status_code=400, detail="File name must not contain path separators.")
-
-    source_name_safe = Path(original_name).name
-    if source_name_safe in {"", ".", ".."}:
-        raise HTTPException(status_code=400, detail="Invalid file name.")
-    if not source_name_safe.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
-
+    source_name_safe = _validate_upload_filename(file.filename or "uploaded.pdf")
     mime_type = file.content_type or ""
     if mime_type not in PDF_MIME_TYPES:
         raise HTTPException(status_code=400, detail="Only PDF MIME types are allowed.")
 
-    hasher = hashlib.sha256()
-    chunks: list[bytes] = []
-    total = 0
-    limit = settings.max_upload_size_bytes
-    while True:
-        chunk = file.file.read(1024 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > limit:
-            raise HTTPException(status_code=413, detail="PDF exceeds configured upload size limit.")
-        hasher.update(chunk)
-        chunks.append(chunk)
-    content = b"".join(chunks)
+    content, digest = _read_upload_with_digest(file, settings.max_upload_size_bytes)
     if not content.startswith(PDF_SIGNATURE):
         raise HTTPException(status_code=400, detail="Uploaded file content is not a valid PDF.")
-    digest = hasher.hexdigest()
     if db.query(LegalAct).filter(LegalAct.file_sha256 == digest).first():
         raise HTTPException(status_code=409, detail="This PDF has already been uploaded.")
 
-    stored_name = f"{uuid4()}.pdf"
-    stored_key = get_storage().save(stored_name, content)
-
+    stored_key = get_storage().save(f"{uuid4()}.pdf", content)
     title_value = (title or "").strip() or source_name_safe.rsplit(".", 1)[0].replace("_", " ")
     act = LegalAct(
         title=title_value,
@@ -201,7 +209,10 @@ def update_act(
     return act
 
 
-@router.delete("/{act_id}")
+@router.delete(
+    "/{act_id}",
+    responses={409: {"description": ACT_REFERENCED_DETAIL}},
+)
 def delete_act(
     act_id: str,
     db: Session = Depends(get_db),
@@ -216,20 +227,14 @@ def delete_act(
         .first()
     )
     if incoming:
-        raise HTTPException(
-            status_code=409,
-            detail="Act is referenced by other Acts and cannot be deleted.",
-        )
+        raise HTTPException(status_code=409, detail=ACT_REFERENCED_DETAIL)
     stored_key = act.stored_file_path
     try:
         db.delete(act)
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Act is referenced by other Acts and cannot be deleted.",
-        ) from None
+        raise HTTPException(status_code=409, detail=ACT_REFERENCED_DETAIL) from None
     try:
         get_storage().delete(stored_key)
     except Exception:

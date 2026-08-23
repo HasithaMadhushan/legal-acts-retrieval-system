@@ -279,6 +279,19 @@ def extract_references_hybrid(
     return _merge_reference_drafts(regex_drafts, llm_drafts)
 
 
+def _fill_missing_targets(existing: ReferenceDraft, draft: ReferenceDraft) -> None:
+    if draft.relationship_type != RelationshipType.UNKNOWN:
+        existing.relationship_type = draft.relationship_type
+    if draft.target_act_title_raw and not existing.target_act_title_raw:
+        existing.target_act_title_raw = draft.target_act_title_raw
+    if draft.target_act_number and not existing.target_act_number:
+        existing.target_act_number = draft.target_act_number
+    if draft.target_act_year and not existing.target_act_year:
+        existing.target_act_year = draft.target_act_year
+    if draft.target_section_number and not existing.target_section_number:
+        existing.target_section_number = draft.target_section_number
+
+
 def _merge_reference_drafts(
     regex_drafts: list[ReferenceDraft],
     llm_drafts: list[ReferenceDraft],
@@ -296,16 +309,7 @@ def _merge_reference_drafts(
             continue
         existing.confidence_score = min(0.98, existing.confidence_score + 0.1)
         existing.extraction_method = ExtractionMethod.LLM
-        if draft.relationship_type != RelationshipType.UNKNOWN:
-            existing.relationship_type = draft.relationship_type
-        if draft.target_act_title_raw and not existing.target_act_title_raw:
-            existing.target_act_title_raw = draft.target_act_title_raw
-        if draft.target_act_number and not existing.target_act_number:
-            existing.target_act_number = draft.target_act_number
-        if draft.target_act_year and not existing.target_act_year:
-            existing.target_act_year = draft.target_act_year
-        if draft.target_section_number and not existing.target_section_number:
-            existing.target_section_number = draft.target_section_number
+        _fill_missing_targets(existing, draft)
     return list(merged.values())
 
 

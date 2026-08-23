@@ -1,11 +1,12 @@
 "use client";
 
-export default function AppError({
-  reset
-}: {
+type AppErrorProps = Readonly<{
   error: Error & { digest?: string };
   reset: () => void;
-}) {
+}>;
+
+export default function AppError({ error, reset }: AppErrorProps) {
+  void error;
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-4 py-16">
       <h1 className="font-serif text-3xl font-semibold">Something went wrong</h1>

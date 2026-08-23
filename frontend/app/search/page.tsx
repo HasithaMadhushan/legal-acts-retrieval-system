@@ -84,6 +84,38 @@ function SearchForm() {
     router.replace(qs ? `/search?${qs}` : "/search");
   }
 
+  function searchErrorMessage(err: unknown): string {
+    if (err instanceof ApiError && err.status === 400) {
+      return "Semantic search is not enabled yet. Use Keyword or All methods.";
+    }
+    if (err instanceof ApiError && err.status === 401) {
+      return "Session expired — sign in again";
+    }
+    return err instanceof Error ? err.message : "Search failed. Login may be required.";
+  }
+
+  function buildSearchParams(values: {
+    year: string;
+    actNumber: string;
+    searchMode: string;
+    verificationStatus: string;
+    offset: number;
+  }) {
+    return {
+      ...(values.year ? { year: values.year } : {}),
+      ...(values.actNumber ? { act_number: values.actNumber } : {}),
+      ...(relationshipType && relationshipType !== "ANY"
+        ? { relationship_type: relationshipType }
+        : {}),
+      ...(values.verificationStatus && values.verificationStatus !== "ANY"
+        ? { verification_status: values.verificationStatus }
+        : {}),
+      search_mode: values.searchMode,
+      limit,
+      offset: String(values.offset)
+    };
+  }
+
   async function runSearch(
     nextOffset = 0,
     queryOverride?: string,
@@ -106,17 +138,16 @@ function SearchForm() {
     }
     setLoading(true);
     try {
-      const data = await search(trimmedQuery, {
-        ...(nextYear ? { year: nextYear } : {}),
-        ...(nextActNumber ? { act_number: nextActNumber } : {}),
-        ...(relationshipType && relationshipType !== "ANY"
-          ? { relationship_type: relationshipType }
-          : {}),
-        ...(nextStatus && nextStatus !== "ANY" ? { verification_status: nextStatus } : {}),
-        search_mode: nextMode,
-        limit,
-        offset: String(nextOffset)
-      });
+      const data = await search(
+        trimmedQuery,
+        buildSearchParams({
+          year: nextYear,
+          actNumber: nextActNumber,
+          searchMode: nextMode,
+          verificationStatus: nextStatus,
+          offset: nextOffset
+        })
+      );
       setResponse(data);
       setOffset(nextOffset);
       syncUrl(nextOffset, {
@@ -127,13 +158,7 @@ function SearchForm() {
         verificationStatus: nextStatus
       });
     } catch (err) {
-      if (err instanceof ApiError && err.status === 400) {
-        setError("Semantic search is not enabled yet. Use Keyword or All methods.");
-      } else if (err instanceof ApiError && err.status === 401) {
-        setError("Session expired — sign in again");
-      } else {
-        setError(err instanceof Error ? err.message : "Search failed. Login may be required.");
-      }
+      setError(searchErrorMessage(err));
     } finally {
       setLoading(false);
     }

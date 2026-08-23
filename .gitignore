@@ -34,7 +34,11 @@ BUILD_AND_DEPLOYMENT_PLAN.md
 EVALUATION_GUIDE.md
 DEMO_SCRIPT.md
 PLAN_LEGAL_SYSTEM_AUDIT.md
-.cursor/
+.cursor/*
+!.cursor/mcp.json
+!.cursor/settings.json
+!.cursor/rules/
+!.cursor/rules/**
 .agents/
 
 .DS_Store

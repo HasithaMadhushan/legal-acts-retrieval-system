@@ -70,6 +70,59 @@ def _source_numbers(text: str) -> set[str]:
     return set(re.findall(r"\d+", text))
 
 
+def _fetch_llm_payload(
+    text: str,
+    *,
+    caller: JsonCaller | None,
+) -> dict[str, Any] | None:
+    digest = _content_hash(text)
+    use_cache = caller is None
+    with SessionLocal() as db:
+        cached = db.get(LlmExtractionCache, digest) if use_cache else None
+        if cached is not None:
+            return cached.response_json
+        prompt = LLM_PROMPT.format(
+            relationships=", ".join(sorted(ALLOWED_RELATIONSHIPS)),
+            text=text[:8000],
+        )
+        try:
+            payload = (caller or _call_gemini)(prompt)
+        except Exception:
+            logger.warning("llm_extraction_failed", exc_info=True)
+            return None
+        if use_cache:
+            db.add(LlmExtractionCache(content_hash=digest, response_json=payload))
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+        return payload
+
+
+def _draft_from_item(item: LlmReferenceItem, text: str) -> ReferenceDraft | None:
+    try:
+        relationship = RelationshipType(item.relationship)
+    except ValueError:
+        return None
+    confidence = item.confidence
+    return ReferenceDraft(
+        raw_reference_text=item.raw_text.strip(),
+        context_snippet=text[:280],
+        relationship_type=relationship,
+        target_act_title_raw=(
+            normalize_act_title(item.target_act_title) if item.target_act_title else None
+        ),
+        target_act_number=str(item.target_act_number) if item.target_act_number else None,
+        target_act_year=item.target_act_year,
+        target_section_number=normalize_section_reference(item.target_section_number),
+        confidence_score=confidence,
+        extraction_method=ExtractionMethod.LLM,
+        verification_status=(
+            VerificationStatus.PENDING if confidence >= 0.7 else VerificationStatus.NEEDS_REVIEW
+        ),
+    )
+
+
 def extract_references_with_llm(
     text: str,
     *,
@@ -78,28 +131,9 @@ def extract_references_with_llm(
     """Extract citations via an LLM. Returns [] on timeout, bad JSON, or invented numbers."""
     if not (text or "").strip():
         return []
-    digest = _content_hash(text)
-    use_cache = caller is None
-    with SessionLocal() as db:
-        cached = db.get(LlmExtractionCache, digest) if use_cache else None
-        if cached is not None:
-            payload = cached.response_json
-        else:
-            prompt = LLM_PROMPT.format(
-                relationships=", ".join(sorted(ALLOWED_RELATIONSHIPS)),
-                text=text[:8000],
-            )
-            try:
-                payload = (caller or _call_gemini)(prompt)
-            except Exception:
-                logger.warning("llm_extraction_failed", exc_info=True)
-                return []
-            if use_cache:
-                db.add(LlmExtractionCache(content_hash=digest, response_json=payload))
-                try:
-                    db.commit()
-                except Exception:
-                    db.rollback()
+    payload = _fetch_llm_payload(text, caller=caller)
+    if payload is None:
+        return []
     try:
         parsed = LlmReferencePayload.model_validate(payload)
     except ValidationError:
@@ -111,31 +145,9 @@ def extract_references_with_llm(
     for item in parsed.references:
         if _is_invented_number(item, allowed_numbers):
             continue
-        try:
-            relationship = RelationshipType(item.relationship)
-        except ValueError:
-            continue
-        confidence = item.confidence
-        drafts.append(
-            ReferenceDraft(
-                raw_reference_text=item.raw_text.strip(),
-                context_snippet=text[:280],
-                relationship_type=relationship,
-                target_act_title_raw=(
-                    normalize_act_title(item.target_act_title) if item.target_act_title else None
-                ),
-                target_act_number=str(item.target_act_number) if item.target_act_number else None,
-                target_act_year=item.target_act_year,
-                target_section_number=normalize_section_reference(item.target_section_number),
-                confidence_score=confidence,
-                extraction_method=ExtractionMethod.LLM,
-                verification_status=(
-                    VerificationStatus.PENDING
-                    if confidence >= 0.7
-                    else VerificationStatus.NEEDS_REVIEW
-                ),
-            )
-        )
+        draft = _draft_from_item(item, text)
+        if draft is not None:
+            drafts.append(draft)
     return drafts
 
 

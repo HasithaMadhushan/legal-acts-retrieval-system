@@ -57,5 +57,6 @@ def test_fail_stale_running_jobs_marks_job_and_act_failed():
     with SessionLocal() as db:
         act = db.get(LegalAct, act_id)
         job = db.get(ProcessingJob, job_id)
-        assert act is not None and job is not None
+        assert act is not None
+        assert job is not None
         assert act.processing_status == ProcessingStatus.FAILED

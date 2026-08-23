@@ -1,0 +1,43 @@
+---
+description: Keep commits and PRs free of Cursor/AI agent attribution
+alwaysApply: true
+---
+
+# No AI / Cursor attribution in commits or PRs
+
+When creating git commits or pull requests for this project:
+
+- Do **not** mention Cursor, Cursor Agent, Auto, Composer, Copilot, ChatGPT, Claude, or any other AI/assistant tool or product name.
+- Do **not** write phrases like "Generated with Cursor", "Co-authored-by: Cursor", "AI-assisted", "agent implemented", or similar attribution.
+- Do **not** add AI tool footers, badges, or trailers to commit messages or PR bodies.
+- Write commit messages and PR titles/bodies as a normal human teammate would: focus on **why** the change matters and what it does for the product.
+
+```text
+❌ BAD
+Add LexAtlas auth UI
+
+Generated with Cursor Agent
+Co-Authored-By: Cursor <cursoragent@cursor.com>
+
+✅ GOOD
+Add LexAtlas auth UI with login, register, and password reset
+```
+
+```text
+❌ BAD
+## Summary
+- Implemented by Cursor agent from Figma
+
+## Test plan
+- …
+```
+
+```text
+✅ GOOD
+## Summary
+- Add LexAtlas auth screens matching the product design
+- Support attorney verification pending admin approval
+
+## Test plan
+- …
+```

@@ -1,0 +1,23 @@
+---
+description: Use SonarQube MCP and keep new code within Sonar quality rules
+alwaysApply: true
+---
+
+# SonarQube for LexAtlas
+
+This project is analyzed on SonarQube Cloud
+(`HasithaMadhushan_legal-acts-retrieval-system`, org `hasithamadhushan`).
+
+When the SonarQube MCP server is connected:
+
+1. Before large code generation, disable automatic analysis if the MCP exposes that tool.
+2. After finishing a batch of edits, analyze changed files with SonarQube MCP.
+3. Prefer fixing reported issues over suppressing them.
+4. Keep cognitive complexity of new functions at or below 15.
+5. Document FastAPI non-2xx `HTTPException` status codes in route `responses=`.
+6. Mark React component prop bags as `Readonly<...>`.
+7. Avoid unused props, dead assignments, and composite asserts in tests.
+
+IDE extension: install **SonarQube for IDE** (`SonarSource.sonarlint-vscode`) and
+bind Connected Mode to this SonarCloud project. MCP config lives in `.cursor/mcp.json`
+and needs a user token in `SONARQUBE_TOKEN`.

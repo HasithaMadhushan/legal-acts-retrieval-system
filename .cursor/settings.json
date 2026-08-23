@@ -1,0 +1,34 @@
+{
+  "plugins": {
+    "superpowers": {
+      "enabled": true
+    },
+    "figma": {
+      "enabled": true
+    },
+    "google-drive": {
+      "enabled": true
+    },
+    "gmail": {
+      "enabled": true
+    },
+    "notion-workspace": {
+      "enabled": true
+    },
+    "playwright": {
+      "enabled": true
+    },
+    "context7-plugin": {
+      "enabled": true
+    },
+    "shadcn": {
+      "enabled": true
+    },
+    "continual-learning": {
+      "enabled": true
+    },
+    "sonarqube": {
+      "enabled": true
+    }
+  }
+}

@@ -3,6 +3,17 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
+type ConfirmDialogProps = Readonly<{
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  pendingLabel?: string;
+  pending?: boolean;
+  onConfirm: () => void | Promise<void>;
+  triggerLabel: string;
+  triggerClassName?: string;
+}>;
+
 export function ConfirmDialog({
   title,
   description,
@@ -12,16 +23,7 @@ export function ConfirmDialog({
   onConfirm,
   triggerLabel,
   triggerClassName
-}: {
-  title: string;
-  description: string;
-  confirmLabel?: string;
-  pendingLabel?: string;
-  pending?: boolean;
-  onConfirm: () => void | Promise<void>;
-  triggerLabel: string;
-  triggerClassName?: string;
-}) {
+}: ConfirmDialogProps) {
   const [open, setOpen] = useState(false);
 
   async function confirm() {
