@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { listActs, processAct } from "@/lib/api";
 import type { LegalAct } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
 
@@ -77,7 +76,6 @@ export default function AdminActsPage() {
   return (
     <RoleGuard allowed={["ADMIN"]} path="/admin/acts">
       <div className="grid">
-        <LegalDisclaimer />
         <section className="panel">
           <div className="toolbar">
             <h1 className="page-title">Admin Acts</h1>

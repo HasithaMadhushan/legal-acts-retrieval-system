@@ -17,12 +17,16 @@ export type RelationshipType =
 export const LEGAL_DISCLAIMER =
   "This system is an academic research prototype for legal information retrieval support only. It does not provide legal advice, legal opinions, authoritative legal interpretation, or legally authoritative consolidation of Acts. Users must verify legal material using official sources and qualified legal professionals where required.";
 
+export type LawyerRequestStatus = "none" | "pending" | "approved" | "rejected";
+
 export interface User {
   id: string;
   full_name: string;
   email: string;
   role: Role;
   is_active: boolean;
+  lawyer_request_status?: LawyerRequestStatus;
+  enrollment_number?: string | null;
 }
 
 export interface LegalAct {

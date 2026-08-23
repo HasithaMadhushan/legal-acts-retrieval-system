@@ -33,6 +33,7 @@ def test_run_migrations_creates_full_schema_from_empty_database(tmp_path, monkey
         "saved_items",
         "evaluation_runs",
         "evaluation_gold_references",
+        "password_reset_tokens",
         "alembic_version",
     }.issubset(table_names)
     assert Path(db_path).exists()

@@ -4,7 +4,6 @@ import { FormEvent, useState } from "react";
 import { search } from "@/lib/api";
 import { containsAdviceIntent } from "@/lib/auth";
 import type { SearchResponse } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { SearchResults } from "@/components/search-results";
 
 export default function SearchPage() {
@@ -55,7 +54,6 @@ export default function SearchPage() {
 
   return (
     <div className="grid">
-      <LegalDisclaimer />
       <form className="panel" onSubmit={submit}>
         <h1>Search verified legal information</h1>
         <p className="muted">

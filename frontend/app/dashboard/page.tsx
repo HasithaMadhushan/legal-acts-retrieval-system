@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getStoredRole } from "@/lib/auth";
 import type { Role } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 
 export default function DashboardPage() {
   const [role, setRole] = useState<Role | null>(null);
@@ -13,7 +12,6 @@ export default function DashboardPage() {
 
   return (
     <div className="grid">
-      <LegalDisclaimer />
       <section className="panel">
         <h1>Dashboard</h1>
         <p className="muted">Current role: {role ?? "Not logged in"}</p>

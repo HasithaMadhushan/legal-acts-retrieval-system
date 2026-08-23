@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { listActs } from "@/lib/api";
 import type { LegalAct } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { StatusBadge } from "@/components/status-badge";
 
 export default function BrowseActsPage() {
@@ -33,7 +32,6 @@ export default function BrowseActsPage() {
 
   return (
     <div className="grid">
-      <LegalDisclaimer />
       <section className="panel">
         <h1>Browse verified Acts</h1>
         <p className="muted">

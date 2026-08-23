@@ -75,8 +75,8 @@ textarea {
   font: inherit;
 }
 
-button,
-.button {
+.shell button:not([data-slot]),
+.shell .button {
   align-items: center;
   background: var(--primary);
   border: 1px solid var(--primary);
@@ -91,18 +91,18 @@ button,
   text-decoration: none;
 }
 
-button.secondary,
-.button.secondary {
+.shell button.secondary:not([data-slot]),
+.shell .button.secondary {
   background: white;
   color: var(--primary);
 }
 
-button.danger {
+.shell button.danger:not([data-slot]) {
   background: var(--danger);
   border-color: var(--danger);
 }
 
-button:disabled {
+.shell button:disabled:not([data-slot]) {
   cursor: not-allowed;
   opacity: 0.55;
 }

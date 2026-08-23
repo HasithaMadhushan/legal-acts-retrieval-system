@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { me } from "@/lib/api";
 import { canAccessRoute, clearSession, getStoredRole, getToken, setSession } from "@/lib/auth";
 import type { Role } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 
 export function RoleGuard({
   allowed,
@@ -46,7 +45,6 @@ export function RoleGuard({
   if (checking) {
     return (
       <div className="panel">
-        <LegalDisclaimer />
         <p>Checking session...</p>
       </div>
     );
@@ -55,7 +53,6 @@ export function RoleGuard({
   if (!role) {
     return (
       <div className="panel">
-        <LegalDisclaimer />
         <p>You must log in to access this page.</p>
         <Link className="button" href="/login">
           Login
@@ -67,7 +64,6 @@ export function RoleGuard({
   if (!allowed.includes(role) || !canAccessRoute(path, role)) {
     return (
       <div className="panel">
-        <LegalDisclaimer />
         <h1>Access restricted</h1>
         <p>This page is limited by role-based permissions.</p>
       </div>

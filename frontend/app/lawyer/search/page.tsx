@@ -4,7 +4,6 @@ import { FormEvent, useEffect, useState } from "react";
 import { createSavedItem, deleteSavedItem, listSavedItems, search } from "@/lib/api";
 import { containsAdviceIntent } from "@/lib/auth";
 import type { SavedItem, SavedItemCreatePayload, SearchResponse, SearchResult } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { RoleGuard } from "@/components/role-guard";
 import { SearchResults } from "@/components/search-results";
 
@@ -113,7 +112,6 @@ export default function LawyerSearchPage() {
   return (
     <RoleGuard allowed={["ADMIN", "LAWYER"]} path="/lawyer/search">
       <div className="grid">
-        <LegalDisclaimer />
         <form className="panel" onSubmit={submit}>
           <h1>Lawyer advanced search</h1>
           <div className="toolbar">

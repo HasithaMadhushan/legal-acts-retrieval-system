@@ -33,13 +33,34 @@ describe("frontend role and safety smoke checks", () => {
     expect(containsAdviceIntent("what should I do in my case")).toBe(true);
   });
 
+  it("register page exposes account type and attorney verification copy", () => {
+    const registerPage = readFileSync("app/register/page.tsx", "utf8");
+    const attorneyPage = readFileSync("app/register/attorney-verification/page.tsx", "utf8");
+    const layout = readFileSync("app/layout.tsx", "utf8");
+    expect(registerPage).toContain("Account type");
+    expect(registerPage).toContain("General User");
+    expect(registerPage).toContain("Attorney-at-Law");
+    expect(registerPage).toContain("Continue to attorney verification");
+    expect(registerPage).toContain("Confirm password");
+    expect(registerPage).not.toContain("Full name");
+    expect(attorneyPage).toContain("Enrollment number");
+    expect(attorneyPage).toContain("Proof of enrollment");
+    expect(layout).toContain("AuthAwareShell");
+  });
+
   it("login and search pages include expected UI text", () => {
     const loginPage = readFileSync("app/login/page.tsx", "utf8");
+    const passwordField = readFileSync("components/auth/password-field.tsx", "utf8");
     const searchPage = readFileSync("app/search/page.tsx", "utf8");
     const lawyerSearchPage = readFileSync("app/lawyer/search/page.tsx", "utf8");
     const searchResults = readFileSync("components/search-results.tsx", "utf8");
     expect(loginPage).toContain("Sign in");
+    expect(loginPage).toContain("Keep me signed in");
+    expect(loginPage).toContain("Forgot password?");
+    expect(loginPage).toContain("Create an account");
+    expect(passwordField).toContain("Show password");
     expect(loginPage).toContain("AdminPass123!");
+    expect(loginPage).not.toContain('useState("AdminPass123!")');
     expect(searchPage).toContain("Search verified legal information");
     expect(searchPage).toContain("Category");
     expect(searchPage).toContain("Relationship type");
@@ -71,7 +92,7 @@ describe("frontend role and safety smoke checks", () => {
     expect(browsePage).toContain("Browse verified Acts");
     expect(browsePage).toContain("General Users see verified information");
     expect(browsePage).toContain("No verified Acts are available");
-    expect(browsePage).toContain("LegalDisclaimer");
+    expect(browsePage).not.toContain("LegalDisclaimer");
     expect(browsePage).not.toContain("Upload");
     expect(browsePage).not.toContain("Workspace");
   });
@@ -152,7 +173,7 @@ describe("frontend role and safety smoke checks", () => {
     expect(evaluationPage).toContain("False positives");
     expect(evaluationPage).toContain("False negatives");
     expect(evaluationPage).toContain("not legal conclusions");
-    expect(evaluationPage).toContain("LegalDisclaimer");
+    expect(evaluationPage).not.toContain("LegalDisclaimer");
     expect(evaluationPage).toContain('RoleGuard allowed={["ADMIN"]}');
   });
 
@@ -189,7 +210,7 @@ describe("frontend role and safety smoke checks", () => {
     expect(preview).not.toContain("Clear mapping");
   });
 
-  it("lawyer workspace exposes saved item groups, note editing, exports, and disclaimer", () => {
+  it("lawyer workspace exposes saved item groups, note editing, and exports", () => {
     const workspacePage = readFileSync("app/lawyer/workspace/page.tsx", "utf8");
     const saveButton = readFileSync("components/save-item-button.tsx", "utf8");
     const actDetailPage = readFileSync("app/acts/[id]/page.tsx", "utf8");

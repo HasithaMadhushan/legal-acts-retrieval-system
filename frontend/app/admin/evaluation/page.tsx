@@ -14,7 +14,6 @@ import type {
   EvaluationRun,
   GoldReference
 } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
 
@@ -99,7 +98,6 @@ export default function AdminEvaluationPage() {
   return (
     <RoleGuard allowed={["ADMIN"]} path="/admin/evaluation">
       <div className="grid">
-        <LegalDisclaimer />
         <section className="panel">
           <h1>Evaluation and demo readiness</h1>
           <p className="muted">
