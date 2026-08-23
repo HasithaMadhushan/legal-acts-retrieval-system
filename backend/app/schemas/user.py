@@ -13,6 +13,8 @@ class UserRead(BaseModel):
     email: EmailStr
     role: UserRole
     is_active: bool
+    lawyer_request_status: str
+    enrollment_number: str | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -5,7 +5,6 @@ import { use, useEffect, useState } from "react";
 import { getAct, listActReferences, listSections } from "@/lib/api";
 import { getStoredRole } from "@/lib/auth";
 import type { LegalAct, LegalReference, Role, Section } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { SaveItemButton } from "@/components/save-item-button";
 import { StatusBadge } from "@/components/status-badge";
 import { VerifiedRelationshipPreview } from "@/components/verified-relationship-preview";
@@ -34,7 +33,6 @@ export default function ActDetailPage({ params }: { params: Promise<{ id: string
 
   return (
     <div className="grid">
-      <LegalDisclaimer />
       <section className="panel">
         <StatusBadge value={act.processing_status} />
         <h1>{act.title}</h1>

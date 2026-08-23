@@ -10,7 +10,6 @@ import {
   updateAct
 } from "@/lib/api";
 import type { LegalAct, ProcessingJob, VerificationSummary } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
 
@@ -163,7 +162,6 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
   return (
     <RoleGuard allowed={["ADMIN"]} path="/admin/acts">
       <div className="grid">
-        <LegalDisclaimer />
         {message ? <p>{message}</p> : null}
         {error ? <p className="error">{error}</p> : null}
         {act ? (

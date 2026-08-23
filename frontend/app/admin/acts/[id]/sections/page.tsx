@@ -9,7 +9,6 @@ import {
   verifySection
 } from "@/lib/api";
 import type { ProcessingJob, Section } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { RoleGuard } from "@/components/role-guard";
 import { SectionViewer } from "@/components/section-viewer";
 
@@ -78,7 +77,6 @@ export default function AdminSectionsPage({ params }: { params: Promise<{ id: st
   return (
     <RoleGuard allowed={["ADMIN"]} path="/admin/acts">
       <div className="grid">
-        <LegalDisclaimer />
         <section className="panel">
           <h1>Review extracted sections</h1>
           <p className="muted">

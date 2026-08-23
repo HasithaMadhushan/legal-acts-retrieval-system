@@ -5,7 +5,6 @@ import { use, useEffect, useState } from "react";
 import { getSection, listSectionReferences } from "@/lib/api";
 import { getStoredRole } from "@/lib/auth";
 import type { LegalReference, Role, Section } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { SaveItemButton } from "@/components/save-item-button";
 import { SectionViewer } from "@/components/section-viewer";
 import { VerifiedRelationshipPreview } from "@/components/verified-relationship-preview";
@@ -33,7 +32,6 @@ export default function SectionDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="grid">
-      <LegalDisclaimer />
       <SectionViewer section={section} />
       <SaveItemButton payload={{ item_type: "SECTION", section_id: section.id }} label="Save Section to workspace" />
       {role === "ADMIN" || role === "LAWYER" ? (

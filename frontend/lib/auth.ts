@@ -3,30 +3,68 @@ import type { Role } from "./types";
 const TOKEN_KEY = "legalActsToken";
 const ROLE_KEY = "legalActsRole";
 
-export function setSession(token: string, role: Role) {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(ROLE_KEY, role);
+function sessionStore(persistent: boolean) {
+  return persistent ? window.localStorage : window.sessionStorage;
+}
+
+function isPersistentSession() {
+  return Boolean(window.localStorage.getItem(TOKEN_KEY));
+}
+
+export function setSession(token: string, role: Role, remember?: boolean) {
+  const persistent = remember ?? isPersistentSession();
+  clearSession();
+  const store = sessionStore(persistent);
+  store.setItem(TOKEN_KEY, token);
+  store.setItem(ROLE_KEY, role);
 }
 
 export function clearSession() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(ROLE_KEY);
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(ROLE_KEY);
+  window.sessionStorage.removeItem(TOKEN_KEY);
+  window.sessionStorage.removeItem(ROLE_KEY);
 }
 
 export function getToken() {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+  return window.sessionStorage.getItem(TOKEN_KEY) ?? window.localStorage.getItem(TOKEN_KEY);
 }
 
 export function getStoredRole(): Role | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(ROLE_KEY) as Role | null;
+  return (
+    (window.sessionStorage.getItem(ROLE_KEY) as Role | null) ??
+    (window.localStorage.getItem(ROLE_KEY) as Role | null)
+  );
 }
 
 export function canAccessRoute(pathname: string, role: Role | null) {
   if (pathname.startsWith("/admin")) return role === "ADMIN";
   if (pathname.startsWith("/lawyer")) return role === "ADMIN" || role === "LAWYER";
   return true;
+}
+
+export function safeNextPath(nextPath: string | null, fallback: string) {
+  if (!nextPath) return fallback;
+  if (!nextPath.startsWith("/") || nextPath.startsWith("//")) return fallback;
+  if (nextPath.includes("\\") || nextPath.includes("@") || /\s/.test(nextPath)) {
+    return fallback;
+  }
+  try {
+    const decoded = decodeURIComponent(nextPath);
+    if (
+      decoded.startsWith("//") ||
+      decoded.includes("\\") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(decoded)
+    ) {
+      return fallback;
+    }
+  } catch {
+    return fallback;
+  }
+  return nextPath;
 }
 
 export function navItemsForRole(role: Role | null) {

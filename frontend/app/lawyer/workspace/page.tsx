@@ -11,7 +11,6 @@ import {
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import type { SavedItem, SavedItemType } from "@/lib/types";
-import { LegalDisclaimer } from "@/components/legal-disclaimer";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
 
@@ -153,7 +152,6 @@ export default function LawyerWorkspacePage() {
   return (
     <RoleGuard allowed={["ADMIN", "LAWYER"]} path="/lawyer/workspace">
       <div className="grid">
-        <LegalDisclaimer />
         <section className="panel">
           <h1>Lawyer workspace</h1>
           <p className="muted">
