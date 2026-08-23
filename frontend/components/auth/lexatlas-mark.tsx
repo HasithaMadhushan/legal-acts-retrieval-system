@@ -1,12 +1,11 @@
 import { cn } from "@/lib/utils";
 
-export function LexAtlasMark({
-  inverted = false,
-  className,
-}: {
+type LexAtlasMarkProps = Readonly<{
   inverted?: boolean;
   className?: string;
-}) {
+}>;
+
+export function LexAtlasMark({ inverted = false, className }: LexAtlasMarkProps) {
   return (
     <div className={cn("flex items-center gap-3", className)}>
       <svg viewBox="0 0 48 48" className="size-10 shrink-0" aria-hidden="true">

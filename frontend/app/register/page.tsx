@@ -34,6 +34,12 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const isAttorney = accountType === "attorney";
+  let submitLabel = "Create account";
+  if (pending) {
+    submitLabel = "Continuing...";
+  } else if (isAttorney) {
+    submitLabel = "Continue to attorney verification";
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -154,11 +160,7 @@ export default function RegisterPage() {
           />
         </FieldGroup>
         <Button type="submit" size="lg" disabled={pending} className="w-full">
-          {pending
-            ? "Continuing..."
-            : isAttorney
-              ? "Continue to attorney verification"
-              : "Create account"}
+          {submitLabel}
         </Button>
         <p className="text-sm text-muted-foreground">
           Already have an account?{" "}

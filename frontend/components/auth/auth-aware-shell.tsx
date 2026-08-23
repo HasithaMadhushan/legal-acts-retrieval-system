@@ -6,7 +6,7 @@ import { AppShell } from "@/components/app-shell";
 
 const AUTH_PREFIXES = ["/login", "/register", "/forgot-password", "/reset-password"];
 
-export function AuthAwareShell({ children }: { children: ReactNode }) {
+export function AuthAwareShell({ children }: Readonly<{ children: ReactNode }>) {
   const pathname = usePathname();
   const isAuthRoute = AUTH_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)

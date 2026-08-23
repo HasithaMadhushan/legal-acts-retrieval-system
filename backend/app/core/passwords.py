@@ -1,12 +1,12 @@
 import re
 
-PASSWORD_REQUIREMENT = "Use at least 8 characters with letters and numbers."
-_PASSWORD_PATTERN = re.compile(r"^(?=.*[A-Za-z])(?=.*\d).{8,}$")
+AUTH_CREDENTIAL_POLICY = "Use at least 8 characters with letters and numbers."
+_CREDENTIAL_POLICY_PATTERN = re.compile(r"^(?=.*[A-Za-z])(?=.*\d).{8,}$")
 _NAME_SPLIT = re.compile(r"[._+\-]+")
 
 
-def password_meets_policy(password: str) -> bool:
-    return bool(_PASSWORD_PATTERN.search(password))
+def password_meets_policy(candidate: str) -> bool:
+    return bool(_CREDENTIAL_POLICY_PATTERN.search(candidate))
 
 
 def full_name_from_email(email: str) -> str:
