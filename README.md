@@ -1,107 +1,97 @@
-# Automated Legal Acts Retrieval System
+# LexAtlas — Automated Legal Acts Retrieval System
 
-Academic MVP for section-level retrieval, statutory reference extraction, Admin verification, role-based legal research access, and evaluation metrics for English-language Sri Lankan Legal Acts.
+Section-level retrieval, statutory reference extraction and mapping, Admin verification, attorney-verified lawyer access, and evaluation metrics for English-language Sri Lankan Legal Acts.
 
-## Legal Status
+Machine-extracted references are labeled and hidden from General Users until verified by an Admin — the system presents retrieval support, not authoritative law. Always verify legal material against official sources.
 
-This system is an academic research prototype for legal information retrieval support only. It does not provide legal advice, legal opinions, authoritative legal interpretation, or legally authoritative consolidation of Acts. Users must verify legal material using official sources and qualified legal professionals where required.
+## Features
+
+- **Ingest:** PDF upload (SHA-256 dedupe, optional metadata) → Docling/PyMuPDF extraction → section segmentation → regex reference extraction → fuzzy mapping with confidence bands.
+- **Verify:** Admin split-view verification of sections and references (verify / reject / link-target), preserved across reprocessing.
+- **Search:** keyword + Postgres full-text with filters; semantic mode planned (pgvector — see `docs/pgvector-and-llm-extraction.md`).
+- **Roles:** Admin (corpus + governance), Lawyer (attorney-verified: workspace, exports, relationship tools), General User (verified content only).
+- **Product features:** attorney verification with proof upload, password reset, reading history ("Continue reading"), saved workspace with CSV/Markdown export.
+- **Evaluation:** gold-reference precision/recall/F1 with confusion breakdown and corpus-wide metrics summary.
+- **Design:** LexAtlas design system (navy/gold/parchment) with high-fidelity mockups in `design/mockups/`.
 
 ## Stack
 
-- Backend: FastAPI, SQLAlchemy 2, Pydantic v2, JWT, bcrypt, PyMuPDF adapter.
-- Frontend: Next.js App Router, React, TypeScript.
-- Local database default: SQLite.
-- Docker database: PostgreSQL 16.
+- Backend: Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, JWT, bcrypt, PyMuPDF + Docling.
+- Frontend: Next.js 16 (App Router), React 19, TypeScript, Tailwind v4 + shadcn/ui.
+- Database: PostgreSQL 16 in Docker; SQLite fallback for local dev/tests.
+- Ops: Gunicorn + uvicorn workers, structured logging, optional Sentry, rate limiting, Caddy TLS overlay, CI (ruff/pytest/typecheck/build).
 
 ## Demo Accounts
 
-- Admin: `admin@example.com` / `AdminPass123!`
-- Lawyer: `lawyer@example.com` / `LawyerPass123!`
-- General User: `user@example.com` / `UserPass123!`
+Demo accounts for all three roles are seeded automatically on backend startup (see `backend/app/db/seed.py`). Sign in at http://127.0.0.1:3000/login after `docker compose up`.
 
-## Local Setup
+## Docker Setup (recommended)
 
-```bash
-cd legal-acts-retrieval-system
-
-python -m venv backend/.venv
-backend/.venv/Scripts/python -m pip install -r backend/requirements.txt
-backend/.venv/Scripts/python -m uvicorn app.main:app --reload --app-dir backend
-
-cd frontend
-npm install
-npm run dev
-```
-
-Backend health: `http://localhost:8000/health`
-
-Frontend: `http://localhost:3000`
-
-PDF processing uses Docling by default for richer document conversion, with PyMuPDF as the
-automatic fallback when Docling is unavailable or cannot parse a PDF. Keep
-`DOC_PARSER_PRIMARY=docling`, `DOCLING_ENABLED=true`, `DOCLING_TIMEOUT_SECONDS=60`, and
-`OCR_ENABLED=false` for the current baseline. If Docling exceeds the timeout, processing falls
-back to PyMuPDF and records a warning. Image-only or scanned PDFs are reported as
-OCR-required/unsupported until OCR is intentionally enabled later.
-
-Act metadata extraction is rule-based and explainable. Admin users should review and correct
-extracted titles, numbers, years, dates, categories, and source fields before treating them as
-reliable project data.
-
-Section segmentation is also rule-based. Admin users should review extracted section records,
-especially schedules, marginal notes, and continuation text from scanned or complex PDFs.
-
-Statutory reference extraction is regex/rule-based. Admin users should review detected
-relationships, unresolved targets, confidence scores, and warnings before treating references as
-reliable project data.
-
-Reference normalization and mapping are deterministic/rule-based. Unresolved Act, section,
-schedule, and principal-enactment mappings must be reviewed by an Admin before demonstration or
-evaluation use.
-
-Extracted metadata, section records, references, and mapped relationships should be treated as
-review-required data until an Admin verifies or corrects them in the Admin review screens.
-
-Search is keyword, metadata, section-level, and relationship-based. General Users receive verified
-sections and verified references only, and search results remain legal information retrieval
-support, not legal advice or authoritative interpretation.
-
-Relationship views are generated from extracted and mapped references. Unresolved relationships
-require Admin review, and relationship tables/graphs are not legal advice or authoritative legal
-interpretation.
-
-The Lawyer workspace is for organizing saved Acts, sections, references, notes, and exportable
-research lists only. Workspace exports include the legal disclaimer and are not legal advice,
-legal opinions, or authoritative interpretation.
-
-The General User UI is simplified for non-lawyer users and shows verified information only,
-including reviewed mapped relationships. It does not provide legal advice, legal opinions,
-recommendations, or authoritative interpretation.
-
-## Docker Setup
+Runs PostgreSQL, FastAPI backend, and Next.js frontend together. No local Python/Node install required.
 
 ```bash
 cd legal-acts-retrieval-system
-docker compose up --build
+
+# First time or after code changes
+docker compose up --build -d
+
+# View logs
+docker compose logs -f
+
+# Stop
+docker compose down
 ```
+
+Open:
+
+- Frontend: http://127.0.0.1:3000
+- Backend health: http://127.0.0.1:8000/health
+- API docs: http://127.0.0.1:8000/docs
+
+Postgres is **not** published to host port `5432` (avoids conflict with a system PostgreSQL install). The backend reaches it as `db:5432` inside the compose network. For ad-hoc SQL:
+
+```bash
+docker compose exec db psql -U legal_acts -d legal_acts
+```
+
+After UI or API changes, rebuild the affected service:
+
+```bash
+docker compose up --build -d backend    # backend only
+docker compose up --build -d frontend   # frontend only
+```
+
+Data persists in Docker volumes (`postgres_data`, `backend_uploads`) until you run `docker compose down -v`.
 
 ### Production deployment
 
-`docker-compose.prod.yml` is a production overlay on top of the file above (unique
-secrets, JSON logs, `restart: unless-stopped`, and a Caddy reverse proxy for automatic
-HTTPS). See the comment header in that file and `deploy/Caddyfile.example` for setup, and
-`PRODUCTION_ROADMAP.md` (Phase 3) for the full deployment checklist.
+`docker-compose.prod.yml` overlays the file above (secrets, JSON logs, Caddy HTTPS). See that file's header and `PRODUCTION_ROADMAP.md` Phase 3.
 
-## MVP Workflow
+## Local Setup (without Docker)
 
-1. Log in as Admin.
-2. Upload an English-language Sri Lankan Legal Act PDF.
-3. Process the document.
-4. Review extracted metadata, sections, and references.
-5. Verify or reject references.
-6. Log in as Lawyer to run advanced search, inspect relationships, save items, and export summaries.
-7. Log in as General User to search simplified verified content only.
-8. Use Admin evaluation tools to enter gold references and calculate precision, recall, and F1.
+```bash
+cd legal-acts-retrieval-system
+
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate   # Windows: backend\.venv\Scripts\activate
+pip install -r backend/requirements.txt
+cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+
+# separate terminal
+cd frontend && npm install && npm run dev -- -H 127.0.0.1 -p 3000
+```
+
+Uses SQLite by default (`backend/legal_acts.db`). Good for fast UI iteration; use Docker for Postgres full-text search behavior.
+
+## Core Workflows
+
+**Admin:** upload PDF → process (live pipeline progress) → review sections & references → verify/reject/link targets → approve attorney requests → run evaluation.
+
+**Lawyer (attorney-verified):** register → upload proof → admin approval → advanced search with relationship filters → save items + notes to workspace → export CSV/Markdown.
+
+**General user:** register → search & browse verified Acts → read sections (reading history tracked) → resume from dashboard.
+
+**Evaluation:** enter or import gold references → run evaluation → precision/recall/F1 with FP/FN breakdown.
 
 ## Final Demo Setup
 
@@ -110,20 +100,19 @@ HTTPS). See the comment header in that file and `deploy/Caddyfile.example` for s
 3. Prepare 8-12 public/sample English-language Sri Lankan Legal Act PDFs.
 4. Include amendment Acts, principal Acts, one schedule-heavy Act, one longer Act, and Acts with cross-references.
 5. Manually verify 30-50 references as gold data before presenting evaluation results.
-6. Follow `DEMO_SCRIPT.md` for Admin, Lawyer, and General User flows.
+6. Follow the Admin → Lawyer → General User walkthrough below.
 
 ## Evaluation Method
 
-Evaluation is deterministic and rule-based. Admin users add manually verified gold references, run the evaluation, and report precision, recall, F1-score, mismatch examples, section segmentation accuracy where section identifiers are available, mapping counts, verification counts, and processing warnings. See `EVALUATION_GUIDE.md` for the gold dataset format and metric definitions.
+Evaluation is deterministic and rule-based. Admin users add manually verified gold references, run the evaluation, and report precision, recall, F1-score, mismatch examples, section segmentation accuracy where section identifiers are available, mapping counts, verification counts, and processing warnings.
 
 ## Project Limits
 
-- English Legal Act PDFs only.
+- English Legal Act PDFs only; no OCR yet (scanned PDFs fail processing).
 - No chatbot and no personalized legal advice generation.
-- Extracted references are not authoritative until verified by an Admin.
-- Semantic embeddings are optional; keyword and metadata search are the MVP baseline.
-- PDF extraction quality depends on source PDF quality.
-- Rule-based extraction and mapping can miss complex drafting patterns.
+- Extracted references are labeled and not authoritative until verified by an Admin.
+- Semantic search is not implemented yet (`search_mode=semantic` returns 501); keyword + full-text are the baseline.
+- PDF extraction quality depends on source PDF quality; rule-based extraction can miss complex drafting (LLM hybrid extraction planned).
 - Unresolved references require Admin review.
 - Evaluation results must be based on manually verified gold data; do not invent accuracy numbers.
-- The system remains an academic legal information retrieval support prototype and is not legal advice.
+

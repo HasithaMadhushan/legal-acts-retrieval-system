@@ -18,12 +18,22 @@ coverage/
 uploads/
 test_uploads/
 *.db
+*.db-journal
 *.sqlite
 *.sqlite3
-
+design/
 # Local / project tooling & research artifacts (do not commit)
 docs/
 data/
+
+# Internal planning & process docs (private, not for the public repo)
+PRD.md
+AUDIT_FINDINGS.md
+PRODUCTION_ROADMAP.md
+BUILD_AND_DEPLOYMENT_PLAN.md
+EVALUATION_GUIDE.md
+DEMO_SCRIPT.md
+PLAN_LEGAL_SYSTEM_AUDIT.md
 .cursor/
 .agents/
 
