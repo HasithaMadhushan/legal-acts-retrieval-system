@@ -71,7 +71,9 @@ def _browse_entry(db: Session, act: LegalAct) -> LegalActBrowseRead:
         )
         .count()
     )
-    last_verified_at = act.updated_at if act.processing_status == ProcessingStatus.VERIFIED else None
+    last_verified_at = (
+        act.updated_at if act.processing_status == ProcessingStatus.VERIFIED else None
+    )
     return LegalActBrowseRead(
         **LegalActRead.model_validate(act).model_dump(),
         verified_section_count=verified_sections,

@@ -27,7 +27,9 @@ def _create_act_and_section() -> tuple[str, str]:
             heading="Obligations of controllers",
             section_type=SectionType.SECTION,
             text="A controller shall implement appropriate measures.",
-            normalized_text=normalize_for_search("A controller shall implement appropriate measures."),
+            normalized_text=normalize_for_search(
+                "A controller shall implement appropriate measures."
+            ),
             sort_order=0,
             verification_status=VerificationStatus.VERIFIED,
         )

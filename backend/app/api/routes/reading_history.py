@@ -75,7 +75,9 @@ def record_reading_history(
     section = None
     if payload.item_type == ReadingHistoryItemType.SECTION:
         if not payload.section_id:
-            raise HTTPException(status_code=400, detail="section_id is required for SECTION history.")
+            raise HTTPException(
+                status_code=400, detail="section_id is required for SECTION history."
+            )
         section = db.get(ActSection, payload.section_id)
         if not section or section.act_id != payload.act_id:
             raise HTTPException(status_code=404, detail="Section not found for this Act.")
@@ -100,7 +102,11 @@ def record_reading_history(
             user_id=current_user.id,
             item_type=payload.item_type,
             act_id=payload.act_id,
-            section_id=payload.section_id if payload.item_type == ReadingHistoryItemType.SECTION else None,
+            section_id=(
+                payload.section_id
+                if payload.item_type == ReadingHistoryItemType.SECTION
+                else None
+            ),
             viewed_at=now,
         )
         db.add(item)
