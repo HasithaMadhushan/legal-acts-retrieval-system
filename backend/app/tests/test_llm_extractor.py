@@ -1,7 +1,11 @@
 
 from app.core.roles import ExtractionMethod, RelationshipType, VerificationStatus
 from app.services.llm_reference_extractor import call_llm_json, extract_references_with_llm
-from app.services.reference_extractor import extract_references, extract_references_hybrid
+from app.services.reference_extractor import (
+    extract_act_references,
+    extract_references,
+    extract_references_hybrid,
+)
 
 SAMPLE = (
     "Section 3 of the Penal Code Act, No. 2 of 1883 is hereby amended. "
@@ -167,6 +171,27 @@ def test_regex_extraction_still_finds_structured_citation():
     drafts = extract_references(SAMPLE)
     assert drafts
     assert any(draft.target_act_number == "2" for draft in drafts)
+
+
+def test_act_extraction_limits_llm_calls_to_configured_section_count(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_extraction_enabled", True)
+    monkeypatch.setattr(settings, "llm_max_sections_per_act", 2)
+    calls: list[str] = []
+
+    def caller(prompt: str):
+        calls.append(prompt)
+        return {"references": []}
+
+    results = extract_act_references(
+        [f"{SAMPLE} Section marker {index}." for index in range(5)],
+        llm_caller=caller,
+    )
+
+    assert len(results) == 5
+    assert len(calls) == 2
 
 
 def test_llm_extractor_accepts_valid_payload(monkeypatch):

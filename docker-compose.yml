@@ -37,7 +37,7 @@ services:
       PDF_INSPECTOR_OCR_MODEL_DIRECTORY: /opt/pdf-inspector/models
       DOCLING_ENABLED: ${DOCLING_ENABLED:-false}
       DOCLING_TIMEOUT_SECONDS: ${DOCLING_TIMEOUT_SECONDS:-60}
-      DOC_PARSER_PRIMARY: ${DOC_PARSER_PRIMARY:-pdf_inspector}
+      DOC_PARSER_PRIMARY: ${DOC_PARSER_PRIMARY:-pymupdf}
       OCR_ENABLED: ${OCR_ENABLED:-true}
       # Optional: set SENTRY_DSN to enable error tracking. Left unset here since
       # this is a local/dev compose file.

@@ -9,6 +9,10 @@ ACT_NUMBER_RE = re.compile(
     r"\b(?:Act\s*,?\s*)?No\.?\s*(?P<number>\d+[A-Za-z]?)\s+of\s+(?P<year>\d{4})\b",
     re.I,
 )
+ACT_NUMBER_SUFFIX_RE = re.compile(
+    r",?\s*No\.?\s*\d+[A-Za-z]?\s+of\s+\d{4}\b",
+    re.I,
+)
 CERTIFIED_RES = [
     re.compile(rf"\bCertified\s+on\s+(?P<date>{DATE_TEXT_RE})", re.I),
     re.compile(rf"\bDate\s+of\s+Certification\s*:?\s*(?P<date>{DATE_TEXT_RE})", re.I),
@@ -22,6 +26,7 @@ TITLE_NOISE_RE = re.compile(
     r"\b("
     r"parliament|democratic socialist republic|sri lanka|gazette|printed|published|"
     r"arrangement of sections|certified on|date of certification|supplement"
+    r"|can be downloaded|documents\.gov\.lk"
     r")\b",
     re.I,
 )
@@ -92,6 +97,10 @@ def _extract_title(first_lines: list[str], fallback_title: str) -> tuple[str, fl
             previous_title = _previous_title(first_lines, index)
             if previous_title:
                 return _clean_title(previous_title), 0.85
+            if index > 0:
+                combined_title = f"{first_lines[index - 1]} {line_without_number}"
+                if _looks_like_title(combined_title):
+                    return _clean_title(combined_title), 0.85
 
     for line in first_lines[:20]:
         if TITLE_DESIGNATOR_RE.search(line) and not TITLE_NOISE_RE.search(line):
@@ -126,11 +135,12 @@ def _looks_like_title(value: str) -> bool:
 
 
 def _remove_act_number(value: str) -> str:
-    return ACT_NUMBER_RE.sub("", value).strip(" ,-:;")
+    return ACT_NUMBER_SUFFIX_RE.sub("", value).strip(" ,-:;")
 
 
 def _clean_title(value: str) -> str:
     value = re.sub(r"\s+", " ", value).strip(" -:;")
+    value = re.sub(r"\s*-\s*", "-", value)
     return value.title() if value.isupper() else value
 
 

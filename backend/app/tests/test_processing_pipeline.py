@@ -165,11 +165,11 @@ def test_image_only_pdf_is_marked_ocr_required(client, admin_token):
     job = _process_and_wait(client, admin_token, act["id"])
     summary = job["summary_json"]
     assert job["status"] == "FAILED"
-    assert "OCR is disabled" in job["error_message"]
+    assert "native/OCR routes" in job["error_message"]
     assert summary["page_count"] == 1
     assert summary["extracted_character_count"] == 0
     assert any("did not produce text" in warning for warning in summary["warnings"])
-    assert any("OCR is disabled" in warning for warning in summary["warnings"])
+    assert any("native/OCR routes" in warning for warning in summary["warnings"])
 
 
 def test_failed_reprocessing_does_not_replace_existing_sections(client, admin_token):

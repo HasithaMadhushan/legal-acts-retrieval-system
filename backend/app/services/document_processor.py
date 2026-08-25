@@ -22,12 +22,13 @@ from app.services.embedding_service import embed_text
 from app.services.metadata_extractor import ExtractedMetadata, extract_metadata
 from app.services.pdf_parser.base import PdfExtractionError, PdfParser
 from app.services.pdf_parser.docling_parser import DoclingParser
+from app.services.pdf_parser.native_first_parser import NativeFirstPdfParser
 from app.services.pdf_parser.pdf_inspector_parser import PdfInspectorParser
 from app.services.pdf_parser.pymupdf_parser import PyMuPdfParser
 from app.services.pdf_parser.quality_gated_parser import QualityGatedPdfParser
 from app.services.reference_extractor import (
     ReferenceDraft,
-    extract_references_hybrid,
+    extract_act_references,
     summarize_references,
 )
 from app.services.reference_mapper import map_references, summarize_mapping
@@ -146,10 +147,7 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
             }
         )
         if not cleaned_text.strip():
-            message = (
-                "No extractable text was found. The PDF may be scanned or image-only; "
-                "OCR is disabled for this MVP."
-            )
+            message = "No extractable text was found after the configured native/OCR routes."
             raise PdfExtractionError(
                 message,
                 parser_name=parsed.parser_name,
@@ -267,8 +265,11 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         job.progress_percent = 80
         reference_drafts: list[ReferenceDraft] = []
         references: list[LegalReference] = []
-        for section in sections:
-            for draft in extract_references_hybrid(section.text):
+        act_reference_drafts = extract_act_references([section.text for section in sections])
+        for section, section_reference_drafts in zip(
+            sections, act_reference_drafts, strict=True
+        ):
+            for draft in section_reference_drafts:
                 reference_drafts.append(draft)
                 reference = LegalReference(
                     source_act_id=act.id,
@@ -433,8 +434,26 @@ def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:
 
     if requested not in {"", "pymupdf"}:
         warnings.append(f"Unknown DOC_PARSER_PRIMARY={requested!r}; PyMuPDF was used.")
+        return PyMuPdfParser(), requested, warnings
 
-    return PyMuPdfParser(), requested or "pymupdf", warnings
+    native = PyMuPdfParser()
+    if not settings.pdf_inspector_enabled:
+        return native, requested or "pymupdf", warnings
+    docling_fallback = None
+    if settings.docling_enabled:
+        docling_fallback = DoclingParser(timeout_seconds=settings.docling_timeout_seconds)
+    return (
+        NativeFirstPdfParser(
+            native,
+            PdfInspectorParser(
+                ocr_enabled=settings.ocr_enabled,
+                ocr_model_directory=settings.pdf_inspector_ocr_model_directory,
+            ),
+            docling_fallback,
+        ),
+        requested or "pymupdf",
+        warnings,
+    )
 
 
 def _processing_status_from_job(job: ProcessingJob) -> ProcessingStatus:

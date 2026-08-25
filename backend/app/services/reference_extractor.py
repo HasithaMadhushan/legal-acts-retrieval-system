@@ -261,12 +261,13 @@ def extract_references_hybrid(
     text: str,
     *,
     llm_caller=None,
+    allow_llm: bool = True,
 ) -> list[ReferenceDraft]:
     """Regex first, then optional LLM merge. Fail open to regex on LLM errors."""
     regex_drafts = extract_references(text)
     from app.core.config import get_settings
 
-    if not get_settings().llm_extraction_enabled:
+    if not allow_llm or not get_settings().llm_extraction_enabled:
         return regex_drafts
     if not _LLM_GATE_RE.search(text or ""):
         return regex_drafts
@@ -277,6 +278,25 @@ def extract_references_hybrid(
     except Exception:
         return regex_drafts
     return _merge_reference_drafts(regex_drafts, llm_drafts)
+
+
+def extract_act_references(
+    section_texts: list[str],
+    *,
+    llm_caller=None,
+) -> list[list[ReferenceDraft]]:
+    """Extract every section with regex and cap optional LLM work per Act."""
+    from app.core.config import get_settings
+
+    llm_limit = max(0, get_settings().llm_max_sections_per_act)
+    return [
+        extract_references_hybrid(
+            text,
+            llm_caller=llm_caller,
+            allow_llm=index < llm_limit,
+        )
+        for index, text in enumerate(section_texts)
+    ]
 
 
 def _fill_missing_targets(existing: ReferenceDraft, draft: ReferenceDraft) -> None:

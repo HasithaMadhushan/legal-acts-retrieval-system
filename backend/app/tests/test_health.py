@@ -9,6 +9,14 @@ def test_health_reports_ok_when_all_checks_pass(client):
     assert data["checks"]["parser_configuration"]["ok"] is True
 
 
+def test_parser_configuration_defaults_to_pymupdf(monkeypatch):
+    from app.core.config import Settings
+
+    monkeypatch.delenv("DOC_PARSER_PRIMARY", raising=False)
+
+    assert Settings(_env_file=None).doc_parser_primary == "pymupdf"
+
+
 def test_response_includes_request_id_header(client):
     response = client.get("/health")
 
