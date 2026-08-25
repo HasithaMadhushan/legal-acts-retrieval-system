@@ -185,6 +185,10 @@ export async function updateAct(id: string, payload: Partial<LegalAct>) {
   });
 }
 
+export async function deleteAct(id: string) {
+  return apiFetch<{ detail: string }>(`/acts/${id}`, { method: "DELETE" });
+}
+
 export async function uploadAct(formData: FormData) {
   return apiFetch<LegalAct>("/acts/upload", { method: "POST", body: formData });
 }
@@ -336,6 +340,20 @@ export async function listEvaluationRuns() {
 
 export async function listUsers() {
   return apiFetch<User[]>("/users");
+}
+
+export async function updateUser(
+  id: string,
+  payload: Partial<Pick<User, "role" | "is_active" | "full_name">>
+) {
+  return apiFetch<User>(`/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deactivateUser(id: string) {
+  return apiFetch<User>(`/users/${id}`, { method: "DELETE" });
 }
 
 export function exportUrl(path: string) {

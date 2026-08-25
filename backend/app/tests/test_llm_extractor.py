@@ -1,12 +1,166 @@
 
 from app.core.roles import ExtractionMethod, RelationshipType, VerificationStatus
-from app.services.llm_reference_extractor import extract_references_with_llm
+from app.services.llm_reference_extractor import call_llm_json, extract_references_with_llm
 from app.services.reference_extractor import extract_references, extract_references_hybrid
 
 SAMPLE = (
     "Section 3 of the Penal Code Act, No. 2 of 1883 is hereby amended. "
     "The principal enactment is also referred to in this section."
 )
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+def test_gemini_provider_requests_schema_constrained_json(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "llm_model", "gemini-3.6-flash")
+    monkeypatch.setattr(settings, "llm_api_key", "test-gemini-key")
+
+    def fake_post(url, **kwargs):
+        assert url.endswith("/gemini-3.6-flash:generateContent")
+        generation_config = kwargs["json"]["generationConfig"]
+        assert generation_config["responseMimeType"] == "application/json"
+        assert generation_config["responseJsonSchema"]["type"] == "object"
+        return FakeResponse(
+            {"candidates": [{"content": {"parts": [{"text": '{"references": []}'}]}}]}
+        )
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    assert call_llm_json("Extract references") == {"references": []}
+
+
+def test_openai_provider_returns_the_shared_reference_payload(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "openai")
+    monkeypatch.setattr(settings, "llm_model", "gpt-5.4-mini")
+    monkeypatch.setattr(settings, "llm_api_key", "test-openai-key")
+
+    expected = {"references": []}
+
+    def fake_post(url, **kwargs):
+        assert url == "https://api.openai.com/v1/chat/completions"
+        assert kwargs["headers"]["Authorization"] == "Bearer test-openai-key"
+        assert kwargs["json"]["response_format"]["type"] == "json_schema"
+        return FakeResponse({"choices": [{"message": {"content": '{"references": []}'}}]})
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    assert call_llm_json("Extract references") == expected
+
+
+def test_provider_retries_once_after_a_transient_timeout(monkeypatch):
+    import httpx
+
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "openai")
+    monkeypatch.setattr(settings, "llm_model", "gpt-5.4-mini")
+    monkeypatch.setattr(settings, "llm_api_key", "test-openai-key")
+    attempts = 0
+
+    def fake_post(_url, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.TimeoutException("temporary timeout")
+        return FakeResponse({"choices": [{"message": {"content": '{"references": []}'}}]})
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    assert call_llm_json("Extract references") == {"references": []}
+    assert attempts == 2
+
+
+def test_anthropic_provider_returns_the_shared_reference_payload(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "anthropic")
+    monkeypatch.setattr(settings, "llm_model", "claude-haiku-4-5")
+    monkeypatch.setattr(settings, "llm_api_key", "test-anthropic-key")
+
+    def fake_post(url, **kwargs):
+        assert url == "https://api.anthropic.com/v1/messages"
+        assert kwargs["headers"]["x-api-key"] == "test-anthropic-key"
+        assert kwargs["json"]["output_config"]["format"]["type"] == "json_schema"
+        return FakeResponse({"content": [{"type": "text", "text": '{"references": []}'}]})
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    assert call_llm_json("Extract references") == {"references": []}
+
+
+def test_mistral_provider_uses_its_openai_compatible_endpoint(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "mistral")
+    monkeypatch.setattr(settings, "llm_model", "mistral-small-2603")
+    monkeypatch.setattr(settings, "llm_api_key", "test-mistral-key")
+
+    def fake_post(url, **kwargs):
+        assert url == "https://api.mistral.ai/v1/chat/completions"
+        assert kwargs["headers"]["Authorization"] == "Bearer test-mistral-key"
+        return FakeResponse({"choices": [{"message": {"content": '{"references": []}'}}]})
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    assert call_llm_json("Extract references") == {"references": []}
+
+
+def test_custom_openai_compatible_provider_uses_configured_base_url(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "openai-compatible")
+    monkeypatch.setattr(settings, "llm_model", "local-legal-model")
+    monkeypatch.setattr(settings, "llm_api_key", "local-key")
+    monkeypatch.setattr(settings, "llm_base_url", "http://model-gateway:11434/v1/")
+
+    def fake_post(url, **kwargs):
+        assert url == "http://model-gateway:11434/v1/chat/completions"
+        return FakeResponse({"choices": [{"message": {"content": '{"references": []}'}}]})
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    assert call_llm_json("Extract references") == {"references": []}
+
+
+def test_llm_cache_is_scoped_to_provider_and_model(monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "llm_provider", "gemini")
+    monkeypatch.setattr(settings, "llm_model", "gemini-3.6-flash")
+    calls = []
+
+    def fake_call(_prompt):
+        calls.append((settings.llm_provider, settings.llm_model))
+        return {"references": []}
+
+    monkeypatch.setattr(
+        "app.services.llm_reference_extractor.call_llm_json",
+        fake_call,
+    )
+    assert extract_references_with_llm(SAMPLE) == []
+
+    monkeypatch.setattr(settings, "llm_provider", "openai")
+    monkeypatch.setattr(settings, "llm_model", "gpt-5.4-mini")
+    assert extract_references_with_llm(SAMPLE) == []
+    assert calls == [
+        ("gemini", "gemini-3.6-flash"),
+        ("openai", "gpt-5.4-mini"),
+    ]
 
 
 def test_regex_extraction_still_finds_structured_citation():

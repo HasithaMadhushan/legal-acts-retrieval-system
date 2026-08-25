@@ -16,6 +16,7 @@ class ProcessingStatus(str, Enum):
 
 
 class ParserName(str, Enum):
+    PDF_INSPECTOR = "PDF_INSPECTOR"
     DOCLING = "DOCLING"
     PYMUPDF = "PYMUPDF"
     OCR = "OCR"

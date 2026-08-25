@@ -6,7 +6,7 @@ Machine-extracted references are labeled and hidden from General Users until ver
 
 ## Features
 
-- **Ingest:** PDF upload (SHA-256 dedupe, optional metadata) → Docling/PyMuPDF extraction → section segmentation → regex reference extraction → fuzzy mapping with confidence bands.
+- **Ingest:** PDF upload (SHA-256 dedupe, optional metadata) → PDF Inspector native text/selective offline OCR → quality gate → optional Docling → PyMuPDF final fallback → section segmentation → reference extraction → fuzzy mapping with confidence bands.
 - **Verify:** Admin split-view verification of sections and references (verify / reject / link-target), preserved across reprocessing.
 - **Search:** keyword + Postgres full-text with filters; semantic mode planned (pgvector — see `docs/pgvector-and-llm-extraction.md`).
 - **Roles:** Admin (corpus + governance), Lawyer (attorney-verified: workspace, exports, relationship tools), General User (verified content only).
@@ -16,7 +16,7 @@ Machine-extracted references are labeled and hidden from General Users until ver
 
 ## Stack
 
-- Backend: Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, JWT, bcrypt, PyMuPDF + Docling.
+- Backend: Python 3.13, FastAPI, SQLAlchemy 2, Pydantic v2, JWT, bcrypt, PDF Inspector + PyMuPDF + optional Docling.
 - Frontend: Next.js 16 (App Router), React 19, TypeScript, Tailwind v4 + shadcn/ui.
 - Database: PostgreSQL 16 in Docker; SQLite fallback for local dev/tests.
 - Ops: Gunicorn + uvicorn workers, structured logging, optional Sentry, rate limiting, Caddy TLS overlay, CI (ruff/pytest/typecheck/build).
@@ -83,6 +83,15 @@ cd frontend && npm install && npm run dev -- -H 127.0.0.1 -p 3000
 
 Uses SQLite by default (`backend/legal_acts.db`). Good for fast UI iteration; use Docker for Postgres full-text search behavior.
 
+The Docker image contains pinned PDFium, ONNX Runtime, and PP-OCRv6 Small assets and verifies an offline OCR smoke test while building. Use Docker for scanned PDFs; the local setup needs those external OCR assets installed separately.
+
+To compare PDF Inspector and PyMuPDF against the repository's hand-checked citation text:
+
+```bash
+cd backend
+PYTHONPATH=. .venv/bin/python scripts/evaluate_pdf_parsers.py --output ../docs/pdf-parser-gold-comparison.json
+```
+
 ## Core Workflows
 
 **Admin:** upload PDF → process (live pipeline progress) → review sections & references → verify/reject/link targets → approve attorney requests → run evaluation.
@@ -108,11 +117,10 @@ Evaluation is deterministic and rule-based. Admin users add manually verified go
 
 ## Project Limits
 
-- English Legal Act PDFs only; no OCR yet (scanned PDFs fail processing).
+- OCR is enabled for English scanned Acts in the Docker deployment; Sinhala/Tamil OCR quality is not established.
 - No chatbot and no personalized legal advice generation.
 - Extracted references are labeled and not authoritative until verified by an Admin.
 - Semantic search is not implemented yet (`search_mode=semantic` returns 501); keyword + full-text are the baseline.
-- PDF extraction quality depends on source PDF quality; rule-based extraction can miss complex drafting (LLM hybrid extraction planned).
+- PDF extraction quality depends on source quality. A structural and citation-retention gate rejects suspect PDF Inspector/Docling output before the PyMuPDF fallback, but Admin review remains required.
 - Unresolved references require Admin review.
 - Evaluation results must be based on manually verified gold data; do not invent accuracy numbers.
-

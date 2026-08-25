@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.services.pdf_parser.base import ParsedPdf, PdfExtractionError
 from app.services.pdf_parser.pymupdf_parser import PyMuPdfParser
+from app.services.pdf_text_normalizer import markdown_to_legal_text
 
 
 class DoclingParser:
@@ -39,7 +40,7 @@ class DoclingParser:
             )
             return parsed
 
-        text = str(conversion["text"])
+        text = markdown_to_legal_text(str(conversion["text"]))
         page_texts = _split_markdown_pages(text)
         return ParsedPdf(
             full_text=text,

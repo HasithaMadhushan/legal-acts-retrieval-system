@@ -134,7 +134,7 @@ def _check_upload_directory() -> dict[str, object]:
 
 
 def _check_parser_configuration() -> dict[str, object]:
-    known_parsers = {"", "pymupdf", "docling", "ocr"}
+    known_parsers = {"", "pymupdf", "pdf_inspector", "pdf-inspector", "docling", "ocr"}
     requested = get_settings().doc_parser_primary.strip().lower()
     if requested not in known_parsers:
         return {"ok": False, "error": f"Unknown DOC_PARSER_PRIMARY={requested!r}."}

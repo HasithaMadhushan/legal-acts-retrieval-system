@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { canAccessRoute, containsAdviceIntent, navItemsForRole, safeNextPath } from "../lib/auth";
+import { displayActTitle, isPlaceholderActTitle } from "../lib/act-display";
 
 describe("frontend role and safety smoke checks", () => {
   it("hides admin routes from non-admin roles", () => {
@@ -45,10 +46,9 @@ describe("frontend role and safety smoke checks", () => {
     const shell = readFileSync("components/app-shell.tsx", "utf8");
     const mark = readFileSync("components/auth/lexatlas-mark.tsx", "utf8");
     const layout = readFileSync("app/layout.tsx", "utf8");
-    expect(shell).toContain("w-[248px]");
-    expect(shell).toContain('label: "Recent"');
+    expect(shell).toContain("w-64");
+    expect(shell).toContain("GlobalSearch");
     expect(shell).toContain("Sign out");
-    expect(shell).toContain("bg-[color:var(--burgundy)]");
     expect(shell).toContain("bg-[color:var(--gold)]");
     expect(shell).toContain("LexAtlasMark sidebar");
     expect(shell).toContain("md:hidden");
@@ -93,7 +93,7 @@ describe("frontend role and safety smoke checks", () => {
     expect(searchPage).toContain("Verified only");
     expect(searchPage).toContain("No verified results are available");
     expect(lawyerSearchPage).toContain("Processing status");
-    expect(lawyerSearchPage).toContain("Verification status");
+    expect(lawyerSearchPage).toContain('label="Status"');
     expect(lawyerSearchPage).toContain("Previous page");
     expect(lawyerSearchPage).toContain("Next page");
     expect(lawyerSearchPage).toContain("Saved to workspace");
@@ -118,26 +118,28 @@ describe("frontend role and safety smoke checks", () => {
     expect(dashboardPage).toContain("Continue reading");
     expect(dashboardPage).toContain("listReadingHistory");
     expect(browsePage).toContain("Browse Acts");
-    expect(browsePage).toContain("Showing");
-    expect(browsePage).toContain("Show more Acts");
+    expect(browsePage).toContain("All verified Acts");
+    expect(browsePage).toContain("All categories");
+    expect(browsePage).toContain("Next →");
     expect(actPage).toContain("Overview");
     expect(actPage).toContain("Mapped references");
     expect(sectionPage).toContain("Reference evidence");
-    expect(sectionPage).toContain("Mapped references");
+    expect(sectionPage).toContain("References involving this section");
   });
 
   it("admin upload and document list expose upload metadata copy", () => {
     const uploadDropzone = readFileSync("components/upload-dropzone.tsx", "utf8");
     const adminActsPage = readFileSync("app/admin/acts/page.tsx", "utf8");
-    expect(uploadDropzone).toContain("PDF only, maximum");
+    expect(uploadDropzone).toContain("PDF only · max");
     expect(uploadDropzone).toContain("The selected file is not reported as a PDF");
-    expect(uploadDropzone).toContain("Optional title");
+    expect(uploadDropzone).toContain("Title override");
     expect(uploadDropzone).toContain("Optional Act number");
     expect(uploadDropzone).toContain("Optional year");
-    expect(adminActsPage).toContain("RegistryStatCard");
-    expect(adminActsPage).toContain("Verified sections");
-    expect(adminActsPage).toContain("Source file");
+    expect(adminActsPage).toContain("All statuses");
+    expect(adminActsPage).toContain("Processing");
     expect(adminActsPage).toContain("Uploaded");
+    expect(adminActsPage).toContain("verified");
+    expect(adminActsPage).toContain("processing");
   });
 
   it("admin act detail exposes processing job summary fields", () => {
@@ -154,7 +156,7 @@ describe("frontend role and safety smoke checks", () => {
 
   it("admin act detail exposes metadata review controls", () => {
     const adminActDetailPage = readFileSync("app/admin/acts/[id]/page.tsx", "utf8");
-    expect(adminActDetailPage).toContain("Metadata review");
+    expect(adminActDetailPage).toContain("Metadata editor");
     expect(adminActDetailPage).toContain("Save metadata");
     expect(adminActDetailPage).toContain("Metadata warnings");
     expect(adminActDetailPage).toContain("Category / subject area");
@@ -196,7 +198,7 @@ describe("frontend role and safety smoke checks", () => {
 
   it("admin evaluation page exposes metrics, mismatches, and safety text", () => {
     const evaluationPage = readFileSync("app/admin/evaluation/page.tsx", "utf8");
-    expect(evaluationPage).toContain("Evaluation and demo readiness");
+    expect(evaluationPage).toContain(">Evaluation</h1>");
     expect(evaluationPage).toContain("Recall is the primary metric");
     expect(evaluationPage).toContain("MetricsPanel");
     expect(evaluationPage).toContain("Documents");
@@ -217,17 +219,24 @@ describe("frontend role and safety smoke checks", () => {
     const relationshipGraph = readFileSync("components/relationship-graph.tsx", "utf8");
     const actDetailPage = readFileSync("app/acts/[id]/page.tsx", "utf8");
     const sectionDetailPage = readFileSync("app/sections/[id]/page.tsx", "utf8");
-    expect(relationshipsPage).toContain("Relationship summary");
-    expect(relationshipsPage).toContain("Lookup mode");
-    expect(relationshipsPage).toContain("Direction");
-    expect(relationshipsPage).toContain("Mapped status");
-    expect(relationshipsPage).toContain("Unresolved");
-    expect(relationshipsPage).toContain("By verification status");
+    expect(relationshipsPage).toContain("Relationship explorer");
+    expect(relationshipsPage).toContain("Focus");
+    expect(relationshipsPage).toContain("Depth");
+    expect(relationshipsPage).toContain("1 hop");
+    expect(relationshipsPage).toContain("2 hops");
+    expect(relationshipsPage).toContain("Render");
+    expect(relationshipsPage).toContain("Selected node");
+    expect(relationshipsPage).toContain("Connections");
     expect(relationshipsPage).toContain("No verified relationships are available yet.");
     expect(relationshipsPage).toContain("Save reference");
     expect(relationshipsPage).toContain("Unsave from workspace");
     expect(relationshipGraph).toContain("Mapped Act-to-Act graph edges only");
+    expect(relationshipGraph).toContain("No external Act-to-Act network to draw yet");
+    expect(relationshipGraph).toContain("Press Render to load the relationship graph");
+    expect(relationshipGraph).toContain("No verified relationships match these filters");
     expect(relationshipGraph).toContain("Unresolved relationships");
+    expect(relationshipGraph).toContain("Focus:");
+    expect(relationshipsPage).toContain("Verified + pending");
     expect(actDetailPage).toContain("Open relationship explorer");
     expect(sectionDetailPage).toContain("Open relationship explorer");
   });
@@ -239,13 +248,46 @@ describe("frontend role and safety smoke checks", () => {
     expect(actDetailPage).toContain("Sections");
     expect(actDetailPage).toContain("Mapped references");
     expect(actDetailPage).toContain("OfficialSourceBlock");
-    expect(sectionDetailPage).toContain("Mapped references");
+    expect(sectionDetailPage).toContain("References involving this section");
     expect(sectionDetailPage).toContain("Reference evidence");
-    expect(sectionDetailPage).toContain("Statute text");
+    expect(sectionDetailPage).toContain("font-serif text-base");
     expect(preview).toContain("No verified relationships are available yet.");
     expect(preview).toContain("information retrieval only");
     expect(preview).not.toContain("Correct reference");
     expect(preview).not.toContain("Clear mapping");
+  });
+
+  it("uses readable Act titles when PDF metadata is placeholder text", () => {
+    expect(
+      isPlaceholderActTitle("This Act can be downloaded from www.documents.gov.lk")
+    ).toBe(true);
+    expect(
+      displayActTitle({
+        title: "This Act can be downloaded from www.documents.gov.lk",
+        act_number: "24",
+        year: 2022,
+        source_file_name: "personal-data-protection.pdf"
+      })
+    ).toBe("Act No. 24 of 2022");
+  });
+
+  it("relationship explorer uses readable Act titles and filter labels", () => {
+    const relationshipsPage = readFileSync("app/lawyer/relationships/page.tsx", "utf8");
+    expect(relationshipsPage).toContain("displayActTitle");
+    expect(relationshipsPage).toContain("relationshipTypeLabel");
+    expect(relationshipsPage).toContain('if (value === "ANY") return "All types"');
+  });
+
+  it("remounts app shell when auth session identity changes", () => {
+    const authAwareShell = readFileSync("components/auth/auth-aware-shell.tsx", "utf8");
+    const auth = readFileSync("lib/auth.ts", "utf8");
+    const shell = readFileSync("components/app-shell.tsx", "utf8");
+    expect(auth).toContain("SESSION_CHANGE_EVENT");
+    expect(auth).toContain("sessionIdentityKey");
+    expect(authAwareShell).toContain("key={sessionKey}");
+    expect(authAwareShell).toContain("SESSION_CHANGE_EVENT");
+    expect(shell).toContain("SESSION_CHANGE_EVENT");
+    expect(shell).toContain("getStoredRole()");
   });
 
   it("redirects expired sessions to login and exposes legal pages", () => {
@@ -259,8 +301,10 @@ describe("frontend role and safety smoke checks", () => {
     expect(api).toContain("export class ApiError");
     expect(api).toContain("expired=1");
     expect(loginPage).toContain("Session expired — sign in again");
-    expect(shell).toContain("/legal/terms");
-    expect(shell).toContain("/legal/privacy");
+    expect(shell).toContain("Signed in as");
+    expect(shell).toContain("Terms");
+    expect(shell).toContain("Privacy");
+    expect(shell).toContain("shrink-0");
     expect(terms).toContain("No legal advice");
     expect(privacy).toContain("We do not sell personal data");
     expect(errorPage).toContain("Something went wrong");
@@ -272,14 +316,14 @@ describe("frontend role and safety smoke checks", () => {
     const saveButton = readFileSync("components/save-item-button.tsx", "utf8");
     const actDetailPage = readFileSync("app/acts/[id]/page.tsx", "utf8");
     const sectionDetailPage = readFileSync("app/sections/[id]/page.tsx", "utf8");
-    expect(workspacePage).toContain("Lawyer workspace");
-    expect(workspacePage).toContain("Saved Acts");
+    expect(workspacePage).toContain(">Workspace</h1>");
+    expect(workspacePage).toContain("Saved {type.toLowerCase()}");
     expect(workspacePage).toContain("Workspace filters");
     expect(workspacePage).toContain("Manual save");
     expect(workspacePage).toContain("Export CSV");
     expect(workspacePage).toContain("Export Markdown");
     expect(workspacePage).toContain("Save note");
-    expect(workspacePage).toContain("Unsave");
+    expect(workspacePage).toContain("Remove");
     expect(workspacePage).toContain("does not provide legal advice");
     expect(saveButton).toContain("Unsave from workspace");
     expect(actDetailPage).toContain("Save Act to workspace");

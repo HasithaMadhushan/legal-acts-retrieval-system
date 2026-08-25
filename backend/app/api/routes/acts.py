@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import or_
+from sqlalchemy import delete, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,9 +12,12 @@ from app.core.config import get_settings
 from app.core.roles import ProcessingStatus, UserRole, VerificationStatus
 from app.db.session import get_db
 from app.models.act_section import ActSection
+from app.models.evaluation import EvaluationGoldReference, EvaluationRun
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
 from app.models.processing_job import ProcessingJob
+from app.models.reading_history import ReadingHistoryItem
+from app.models.saved_item import SavedItem
 from app.models.user import User
 from app.schemas.legal_act import (
     LegalActBrowseRead,
@@ -221,15 +224,53 @@ def delete_act(
     act = db.get(LegalAct, act_id)
     if not act:
         raise HTTPException(status_code=404, detail="Act not found.")
+    section_ids = [
+        row[0] for row in db.query(ActSection.id).filter(ActSection.act_id == act_id)
+    ]
+    incoming_filter = LegalReference.target_act_id == act_id
+    if section_ids:
+        incoming_filter = or_(
+            incoming_filter,
+            LegalReference.target_section_id.in_(section_ids),
+        )
     incoming = (
         db.query(LegalReference)
-        .filter(LegalReference.target_act_id == act_id)
+        .filter(
+            incoming_filter,
+            LegalReference.source_act_id != act_id,
+        )
         .first()
     )
     if incoming:
         raise HTTPException(status_code=409, detail=ACT_REFERENCED_DETAIL)
     stored_key = act.stored_file_path
     try:
+        reference_ids = [
+            row[0]
+            for row in db.query(LegalReference.id).filter(
+                LegalReference.source_act_id == act_id
+            )
+        ]
+        saved_item_filter = SavedItem.act_id == act_id
+        if section_ids:
+            saved_item_filter = or_(
+                saved_item_filter,
+                SavedItem.section_id.in_(section_ids),
+            )
+        if reference_ids:
+            saved_item_filter = or_(
+                saved_item_filter,
+                SavedItem.reference_id.in_(reference_ids),
+            )
+        db.execute(delete(SavedItem).where(saved_item_filter))
+        db.execute(delete(ReadingHistoryItem).where(ReadingHistoryItem.act_id == act_id))
+        db.execute(
+            delete(EvaluationGoldReference).where(EvaluationGoldReference.act_id == act_id)
+        )
+        db.execute(delete(EvaluationRun).where(EvaluationRun.act_id == act_id))
+        db.execute(delete(ProcessingJob).where(ProcessingJob.act_id == act_id))
+        db.execute(delete(LegalReference).where(LegalReference.source_act_id == act_id))
+        db.execute(delete(ActSection).where(ActSection.act_id == act_id))
         db.delete(act)
         db.commit()
     except IntegrityError:

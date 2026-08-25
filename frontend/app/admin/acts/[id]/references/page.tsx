@@ -19,6 +19,17 @@ import type {
 } from "@/lib/types";
 import { ReferenceTable } from "@/components/reference-table";
 import { RoleGuard } from "@/components/role-guard";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 
 export default function AdminReferencesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -105,7 +116,8 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
 
   async function createManualReference(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     const payload: ReferenceCreatePayload = {
       source_act_id: id,
       source_section_id: optionalString(formData.get("source_section_id")),
@@ -127,7 +139,7 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
     setMessage("");
     try {
       await createReference(payload);
-      event.currentTarget.reset();
+      form.reset();
       setMessage("Manual reference created.");
       await load();
     } catch (err) {
@@ -152,36 +164,34 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
 
   return (
     <RoleGuard allowed={["ADMIN"]} path="/admin/acts">
-      <div className="grid">
-        <section className="panel">
-          <h1>Review detected references</h1>
-          <p className="muted">References stay pending or need review until an Admin verifies or rejects them.</p>
-          <div className="toolbar">
+      <div className="flex flex-col gap-5">
+        <section>
+          <h1 className="font-serif text-[30px] font-semibold tracking-[-0.45px] text-[#0b1626]">
+            Reference verification
+          </h1>
+          <p className="mt-2 max-w-3xl text-[14.5px] text-muted-foreground">
+            Verify, correct or reject extracted statutory references. Verified references become visible to
+            Lawyers and General Users.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3 text-sm text-muted-foreground">
             <span>Detected: {latestReferenceSummary?.references_detected ?? references.length}</span>
-            <span>Unresolved parsed targets: {latestReferenceSummary?.unresolved_target_count ?? references.filter((reference) => !hasStructuredTarget(reference)).length}</span>
-            <span>Mapped Acts: {latestMappingSummary?.mapped_act_count ?? references.filter(isMapped).length}</span>
-            <span>Mapped sections: {latestMappingSummary?.mapped_section_count ?? references.filter((reference) => Boolean(reference.target_section_id)).length}</span>
-            <span>Unresolved mappings: {latestMappingSummary?.unresolved_count ?? references.filter((reference) => !isMapped(reference)).length}</span>
+            <span>
+              Unresolved parsed targets:{" "}
+              {latestReferenceSummary?.unresolved_target_count ??
+                references.filter((reference) => !hasStructuredTarget(reference)).length}
+            </span>
+            <span>
+              Mapped Acts: {latestMappingSummary?.mapped_act_count ?? references.filter(isMapped).length}
+            </span>
+            <span>
+              Unresolved mappings:{" "}
+              {latestMappingSummary?.unresolved_count ?? references.filter((reference) => !isMapped(reference)).length}
+            </span>
           </div>
-          {latestReferenceSummary?.by_type ? (
-            <p className="muted">
-              By type: {Object.entries(latestReferenceSummary.by_type).map(([type, count]) => `${type}: ${count}`).join(", ")}
-            </p>
-          ) : null}
-          {latestMappingSummary?.confidence_bands ? (
-            <p className="muted">
-              Mapping confidence: {Object.entries(latestMappingSummary.confidence_bands).map(([band, count]) => `${band}: ${count}`).join(", ")}
-            </p>
-          ) : null}
-          {latestMappingSummary ? (
-            <p className="muted">
-              Principal enactment context used: {latestMappingSummary.principal_context_used_count ?? 0}
-            </p>
-          ) : null}
           {referenceWarnings.length > 0 ? (
-            <div>
-              <h2>Reference extraction warnings</h2>
-              <ul>
+            <div className="mt-4 rounded-lg border border-border bg-card p-4">
+              <h2 className="font-serif text-lg font-semibold">Reference extraction warnings</h2>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                 {referenceWarnings.map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
@@ -189,82 +199,133 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
             </div>
           ) : null}
           {mappingWarnings.length > 0 ? (
-            <div>
-              <h2>Mapping warnings</h2>
-              <ul>
+            <div className="mt-4 rounded-lg border border-border bg-card p-4">
+              <h2 className="font-serif text-lg font-semibold">Mapping warnings</h2>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                 {mappingWarnings.map((warning) => (
                   <li key={warning}>{warning}</li>
                 ))}
               </ul>
             </div>
           ) : null}
-          <div className="toolbar">
-            <div className="field">
-              <label htmlFor="relationshipFilter">Relationship type</label>
-              <select id="relationshipFilter" value={relationshipFilter} onChange={(event) => setRelationshipFilter(event.target.value)}>
-                <option value="">Any</option>
-                {(["REFERS_TO", "AMENDS", "REPEALS", "INSERTS", "SUBSTITUTES", "ADDS", "CROSS_REFERENCE"] satisfies RelationshipType[]).map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="statusFilter">Verification status</label>
-              <select id="statusFilter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                <option value="">Any</option>
-                {(["PENDING", "NEEDS_REVIEW", "VERIFIED", "REJECTED"] satisfies VerificationStatus[]).map((status) => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="targetFilter">Target status</label>
-              <select id="targetFilter" value={targetFilter} onChange={(event) => setTargetFilter(event.target.value)}>
-                <option value="">Any</option>
-                <option value="resolved">Mapped target</option>
-                <option value="unresolved">Unresolved mapping</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="confidenceFilter">Confidence range</label>
-              <select id="confidenceFilter" value={confidenceFilter} onChange={(event) => setConfidenceFilter(event.target.value)}>
-                <option value="">Any</option>
-                <option value="high">High: 85%+</option>
-                <option value="medium">Medium: 60-84%</option>
-                <option value="low">Low: under 60%</option>
-              </select>
-            </div>
-          </div>
-          {message ? <p>{message}</p> : null}
-          {error ? <p className="error">{error}</p> : null}
-          {loading ? <p>Loading references...</p> : null}
-          <ReferenceTable
-            references={filteredReferences}
-            admin
-            onVerify={verify}
-            onReject={reject}
-            onUpdate={saveCorrection}
-            onLinkTarget={saveMapping}
-          />
         </section>
-        <section className="panel">
-          <h2>Manual reference creation</h2>
-          <p className="muted">
+
+        <Card className="rounded-lg">
+          <CardContent className="space-y-4 p-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Relationship type</Label>
+                <Select
+                  value={relationshipFilter || "ANY"}
+                  onValueChange={(value) => setRelationshipFilter(value === "ANY" ? "" : (value ?? ""))}
+                >
+                  <SelectTrigger className="h-9 w-full bg-[#fffdf8]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ANY">Any</SelectItem>
+                    {(
+                      ["REFERS_TO", "AMENDS", "REPEALS", "INSERTS", "SUBSTITUTES", "ADDS", "CROSS_REFERENCE"] satisfies RelationshipType[]
+                    ).map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Verification status</Label>
+                <Select
+                  value={statusFilter || "ANY"}
+                  onValueChange={(value) => setStatusFilter(value === "ANY" ? "" : (value ?? ""))}
+                >
+                  <SelectTrigger className="h-9 w-full bg-[#fffdf8]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ANY">Any</SelectItem>
+                    {(["PENDING", "NEEDS_REVIEW", "VERIFIED", "REJECTED"] satisfies VerificationStatus[]).map(
+                      (status) => (
+                        <SelectItem key={status} value={status}>
+                          {status}
+                        </SelectItem>
+                      )
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Target status</Label>
+                <Select
+                  value={targetFilter || "ANY"}
+                  onValueChange={(value) => setTargetFilter(value === "ANY" ? "" : (value ?? ""))}
+                >
+                  <SelectTrigger className="h-9 w-full bg-[#fffdf8]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ANY">Any</SelectItem>
+                    <SelectItem value="resolved">Mapped target</SelectItem>
+                    <SelectItem value="unresolved">Unresolved mapping</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Confidence range</Label>
+                <Select
+                  value={confidenceFilter || "ANY"}
+                  onValueChange={(value) => setConfidenceFilter(value === "ANY" ? "" : (value ?? ""))}
+                >
+                  <SelectTrigger className="h-9 w-full bg-[#fffdf8]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ANY">Any</SelectItem>
+                    <SelectItem value="high">High: 85%+</SelectItem>
+                    <SelectItem value="medium">Medium: 60-84%</SelectItem>
+                    <SelectItem value="low">Low: under 60%</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            {loading ? <p className="text-sm text-muted-foreground">Loading references...</p> : null}
+            <ReferenceTable
+              references={filteredReferences}
+              admin
+              onVerify={verify}
+              onReject={reject}
+              onUpdate={saveCorrection}
+              onLinkTarget={saveMapping}
+            />
+          </CardContent>
+        </Card>
+
+        <details className="rounded-lg border border-border bg-card p-4 shadow-sm">
+          <summary className="cursor-pointer font-serif text-xl font-semibold">Manual reference creation</summary>
+          <p className="mt-1 text-sm text-muted-foreground">
             Create a manual reference only from verifiable Act text. This does not provide legal advice.
           </p>
-          <form className="grid" onSubmit={createManualReference}>
-            <div className="grid two">
-              <div className="field">
-                <label htmlFor="manualSourceAct">Source Act ID</label>
-                <input id="manualSourceAct" value={id} readOnly />
+          <form className="mt-4 grid gap-3" onSubmit={createManualReference}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="manualSourceAct">Source Act ID</Label>
+                <Input id="manualSourceAct" value={id} readOnly className="bg-[#fffdf8]" />
               </div>
-              <div className="field">
-                <label htmlFor="manualSourceSection">Source section ID</label>
-                <input id="manualSourceSection" name="source_section_id" />
+              <div className="space-y-1.5">
+                <Label htmlFor="manualSourceSection">Source section ID</Label>
+                <Input id="manualSourceSection" name="source_section_id" className="bg-[#fffdf8]" />
               </div>
-              <div className="field">
-                <label htmlFor="manualRelationship">Relationship type</label>
-                <select id="manualRelationship" name="relationship_type" defaultValue="REFERS_TO">
+              <div className="space-y-1.5">
+                <Label htmlFor="manualRelationship">Relationship type</Label>
+                <select
+                  id="manualRelationship"
+                  name="relationship_type"
+                  defaultValue="REFERS_TO"
+                  className="h-9 w-full rounded-md border border-input bg-[#fffdf8] px-3 text-sm"
+                >
                   <option value="REFERS_TO">REFERS_TO</option>
                   <option value="AMENDS">AMENDS</option>
                   <option value="REPEALS">REPEALS</option>
@@ -275,9 +336,14 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
                   <option value="UNKNOWN">UNKNOWN</option>
                 </select>
               </div>
-              <div className="field">
-                <label htmlFor="manualStatus">Verification status</label>
-                <select id="manualStatus" name="verification_status" defaultValue="NEEDS_REVIEW">
+              <div className="space-y-1.5">
+                <Label htmlFor="manualStatus">Verification status</Label>
+                <select
+                  id="manualStatus"
+                  name="verification_status"
+                  defaultValue="NEEDS_REVIEW"
+                  className="h-9 w-full rounded-md border border-input bg-[#fffdf8] px-3 text-sm"
+                >
                   <option value="PENDING">PENDING</option>
                   <option value="NEEDS_REVIEW">NEEDS_REVIEW</option>
                   <option value="VERIFIED">VERIFIED</option>
@@ -285,55 +351,73 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
                 </select>
               </div>
             </div>
-            <div className="field">
-              <label htmlFor="manualRaw">Raw matched text</label>
-              <input id="manualRaw" name="raw_reference_text" required />
+            <div className="space-y-1.5">
+              <Label htmlFor="manualRaw">Raw matched text</Label>
+              <Input id="manualRaw" name="raw_reference_text" required className="bg-[#fffdf8]" />
             </div>
-            <div className="field">
-              <label htmlFor="manualContext">Context snippet</label>
-              <textarea id="manualContext" name="context_snippet" required />
+            <div className="space-y-1.5">
+              <Label htmlFor="manualContext">Context snippet</Label>
+              <textarea
+                id="manualContext"
+                name="context_snippet"
+                required
+                className="min-h-20 w-full rounded-md border border-input bg-[#fffdf8] px-3 py-2 text-sm"
+              />
             </div>
-            <div className="grid two">
-              <div className="field">
-                <label htmlFor="manualTargetTitle">Target Act title</label>
-                <input id="manualTargetTitle" name="target_act_title_raw" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="manualTargetTitle">Target Act title</Label>
+                <Input id="manualTargetTitle" name="target_act_title_raw" className="bg-[#fffdf8]" />
               </div>
-              <div className="field">
-                <label htmlFor="manualTargetNumber">Target Act number</label>
-                <input id="manualTargetNumber" name="target_act_number" />
+              <div className="space-y-1.5">
+                <Label htmlFor="manualTargetNumber">Target Act number</Label>
+                <Input id="manualTargetNumber" name="target_act_number" className="bg-[#fffdf8]" />
               </div>
-              <div className="field">
-                <label htmlFor="manualTargetYear">Target Act year</label>
-                <input id="manualTargetYear" name="target_act_year" inputMode="numeric" />
+              <div className="space-y-1.5">
+                <Label htmlFor="manualTargetYear">Target Act year</Label>
+                <Input id="manualTargetYear" name="target_act_year" inputMode="numeric" className="bg-[#fffdf8]" />
               </div>
-              <div className="field">
-                <label htmlFor="manualTargetSection">Target section</label>
-                <input id="manualTargetSection" name="target_section_number" />
+              <div className="space-y-1.5">
+                <Label htmlFor="manualTargetSection">Target section</Label>
+                <Input id="manualTargetSection" name="target_section_number" className="bg-[#fffdf8]" />
               </div>
-              <div className="field">
-                <label htmlFor="manualTargetPath">Target path</label>
-                <input id="manualTargetPath" name="target_section_path" />
+              <div className="space-y-1.5">
+                <Label htmlFor="manualTargetPath">Target path</Label>
+                <Input id="manualTargetPath" name="target_section_path" className="bg-[#fffdf8]" />
               </div>
-              <div className="field">
-                <label htmlFor="manualConfidence">Confidence score</label>
-                <input id="manualConfidence" name="confidence_score" type="number" min="0" max="1" step="0.01" defaultValue="0.5" />
+              <div className="space-y-1.5">
+                <Label htmlFor="manualConfidence">Confidence score</Label>
+                <Input
+                  id="manualConfidence"
+                  name="confidence_score"
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  defaultValue={0.5}
+                  className="bg-[#fffdf8]"
+                />
               </div>
-              <div className="field">
-                <label htmlFor="manualTargetActId">Mapped target Act ID</label>
-                <input id="manualTargetActId" name="target_act_id" />
+              <div className="space-y-1.5">
+                <Label htmlFor="manualTargetActId">Mapped target Act ID</Label>
+                <Input id="manualTargetActId" name="target_act_id" className="bg-[#fffdf8]" />
               </div>
-              <div className="field">
-                <label htmlFor="manualTargetSectionId">Mapped target section ID</label>
-                <input id="manualTargetSectionId" name="target_section_id" />
+              <div className="space-y-1.5">
+                <Label htmlFor="manualTargetSectionId">Mapped target section ID</Label>
+                <Input id="manualTargetSectionId" name="target_section_id" className="bg-[#fffdf8]" />
               </div>
             </div>
-            <div className="field">
-              <label htmlFor="manualNotes">Review notes</label>
-              <textarea id="manualNotes" name="notes" />
+            <div className="space-y-1.5">
+              <Label htmlFor="manualNotes">Review notes</Label>
+              <textarea
+                id="manualNotes"
+                name="notes"
+                className="min-h-20 w-full rounded-md border border-input bg-[#fffdf8] px-3 py-2 text-sm"
+              />
             </div>
-            <button type="submit">Create manual reference</button>
+            <Button type="submit">Create manual reference</Button>
           </form>
-        </section>
+        </details>
       </div>
     </RoleGuard>
   );

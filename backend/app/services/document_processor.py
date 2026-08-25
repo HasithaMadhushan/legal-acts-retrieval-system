@@ -22,7 +22,9 @@ from app.services.embedding_service import embed_text
 from app.services.metadata_extractor import ExtractedMetadata, extract_metadata
 from app.services.pdf_parser.base import PdfExtractionError, PdfParser
 from app.services.pdf_parser.docling_parser import DoclingParser
+from app.services.pdf_parser.pdf_inspector_parser import PdfInspectorParser
 from app.services.pdf_parser.pymupdf_parser import PyMuPdfParser
+from app.services.pdf_parser.quality_gated_parser import QualityGatedPdfParser
 from app.services.reference_extractor import (
     ReferenceDraft,
     extract_references_hybrid,
@@ -390,6 +392,30 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
 def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:
     requested = settings.doc_parser_primary.strip().lower()
     warnings: list[str] = []
+
+    if requested in {"pdf-inspector", "pdf_inspector"}:
+        if settings.pdf_inspector_enabled:
+            docling_fallback = None
+            if settings.docling_enabled:
+                docling_fallback = DoclingParser(
+                    timeout_seconds=settings.docling_timeout_seconds
+                )
+            return (
+                QualityGatedPdfParser(
+                    PdfInspectorParser(
+                        ocr_enabled=settings.ocr_enabled,
+                        ocr_model_directory=settings.pdf_inspector_ocr_model_directory,
+                    ),
+                    docling_fallback,
+                    PyMuPdfParser(),
+                ),
+                requested,
+                warnings,
+            )
+        warnings.append(
+            "PDF Inspector was requested, but PDF_INSPECTOR_ENABLED=false; PyMuPDF was used."
+        )
+        return PyMuPdfParser(), requested, warnings
 
     if requested == "docling":
         if settings.docling_enabled:

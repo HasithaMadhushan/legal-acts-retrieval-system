@@ -6,6 +6,11 @@ import { containsAdviceIntent } from "@/lib/auth";
 import type { SavedItem, SavedItemCreatePayload, SearchResponse, SearchResult } from "@/lib/types";
 import { RoleGuard } from "@/components/role-guard";
 import { SearchResults } from "@/components/search-results";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function LawyerSearchPage() {
   const [query, setQuery] = useState("");
@@ -111,81 +116,91 @@ export default function LawyerSearchPage() {
 
   return (
     <RoleGuard allowed={["ADMIN", "LAWYER"]} path="/lawyer/search">
-      <div className="grid">
-        <form className="panel" onSubmit={submit}>
-          <h1>Lawyer advanced search</h1>
-          <div className="toolbar">
-            <div className="field">
-              <label htmlFor="query">Query</label>
-              <input id="query" value={query} onChange={(event) => setQuery(event.target.value)} />
-            </div>
-            <div className="field">
-              <label htmlFor="year">Year</label>
-              <input id="year" value={year} onChange={(event) => setYear(event.target.value)} inputMode="numeric" />
-            </div>
-            <div className="field">
-              <label htmlFor="actNumber">Act number</label>
-              <input id="actNumber" value={actNumber} onChange={(event) => setActNumber(event.target.value)} />
-            </div>
-            <div className="field">
-              <label htmlFor="category">Category</label>
-              <input id="category" value={category} onChange={(event) => setCategory(event.target.value)} />
-            </div>
-            <div className="field">
-              <label htmlFor="processingStatus">Processing status</label>
-              <select id="processingStatus" value={processingStatus} onChange={(event) => setProcessingStatus(event.target.value)}>
-                <option value="">Any</option>
-                <option value="UPLOADED">UPLOADED</option>
-                <option value="PROCESSING">PROCESSING</option>
-                <option value="PROCESSED">PROCESSED</option>
-                <option value="FAILED">FAILED</option>
-                <option value="VERIFIED">VERIFIED</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="relationship">Relationship</label>
-              <select id="relationship" value={relationshipType} onChange={(event) => setRelationshipType(event.target.value)}>
-                <option value="">Any</option>
-                <option>AMENDS</option>
-                <option>REPEALS</option>
-                <option>INSERTS</option>
-                <option>SUBSTITUTES</option>
-                <option>ADDS</option>
-                <option>CROSS_REFERENCE</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="status">Verification status</label>
-              <select id="status" value={verificationStatus} onChange={(event) => setVerificationStatus(event.target.value)}>
-                <option value="">Default</option>
-                <option>VERIFIED</option>
-                <option>PENDING</option>
-                <option>NEEDS_REVIEW</option>
-                <option>REJECTED</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="mapped">Mapped status</label>
-              <select id="mapped" value={mappedStatus} onChange={(event) => setMappedStatus(event.target.value)}>
-                <option value="">Any</option>
-                <option value="mapped">Mapped references</option>
-                <option value="unresolved">Unresolved references</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="limit">Page size</label>
-              <select id="limit" value={limit} onChange={(event) => setLimit(event.target.value)}>
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
-              </select>
-            </div>
-            <button type="submit" disabled={loading}>{loading ? "Searching..." : "Search"}</button>
+      <div className="flex flex-col gap-5">
+        <div>
+          <h1 className="font-serif text-[30px] font-semibold tracking-[-0.45px] text-[#0b1626]">
+            Relationship search
+          </h1>
+          <p className="mt-2 max-w-xl text-[14.5px] text-muted-foreground">
+            Filter mapped edges by relationship type and verification status. Save useful citations to your
+            workspace.
+          </p>
+        </div>
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-end">
+            <SearchField label="Query">
+              <Input
+                id="query"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="repeal · bribery"
+                className="h-[34px] bg-[#fffdf8]"
+              />
+            </SearchField>
+            <SelectField
+              label="Relationship"
+              value={relationshipType || "ANY"}
+              onChange={(value) => setRelationshipType(value === "ANY" ? "" : value)}
+              options={["ANY", "AMENDS", "REPEALS", "INSERTS", "SUBSTITUTES", "ADDS", "CROSS_REFERENCE"]}
+            />
+            <SelectField
+              label="Status"
+              value={verificationStatus || "DEFAULT"}
+              onChange={(value) => setVerificationStatus(value === "DEFAULT" ? "" : value)}
+              options={["DEFAULT", "VERIFIED", "PENDING", "NEEDS_REVIEW", "REJECTED"]}
+            />
+            <Button type="submit" disabled={loading} className="h-[34px] px-4">
+              {loading ? "Searching…" : "Search"}
+            </Button>
           </div>
-          {error ? <p className="error">{error}</p> : null}
-          {workspaceMessage ? <p className="muted">{workspaceMessage}</p> : null}
+          <details className="text-sm text-muted-foreground">
+            <summary className="cursor-pointer font-medium text-foreground">Advanced filters</summary>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+              <SearchField label="Year">
+                <Input
+                  id="year"
+                  value={year}
+                  onChange={(event) => setYear(event.target.value)}
+                  inputMode="numeric"
+                  className="h-9 bg-[#fffdf8]"
+                />
+              </SearchField>
+              <SearchField label="Act number">
+                <Input
+                  id="actNumber"
+                  value={actNumber}
+                  onChange={(event) => setActNumber(event.target.value)}
+                  className="h-9 bg-[#fffdf8]"
+                />
+              </SearchField>
+              <SearchField label="Category">
+                <Input
+                  id="category"
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value)}
+                  className="h-9 bg-[#fffdf8]"
+                />
+              </SearchField>
+              <SelectField
+                label="Processing status"
+                value={processingStatus || "ANY"}
+                onChange={(value) => setProcessingStatus(value === "ANY" ? "" : value)}
+                options={["ANY", "UPLOADED", "PROCESSING", "PROCESSED", "FAILED", "VERIFIED"]}
+              />
+              <SelectField
+                label="Mapped status"
+                value={mappedStatus || "ANY"}
+                onChange={(value) => setMappedStatus(value === "ANY" ? "" : value)}
+                options={["ANY", "mapped", "unresolved"]}
+              />
+              <SelectField label="Page size" value={limit} onChange={setLimit} options={["10", "25", "50"]} />
+            </div>
+          </details>
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {workspaceMessage ? <p className="text-sm text-muted-foreground">{workspaceMessage}</p> : null}
         </form>
-        {loading ? <p>Loading search results...</p> : null}
+        {response ? <p className="text-sm"><strong>{response.total_results} mapped edges</strong><span className="text-muted-foreground"> · pending items are marked for review</span></p> : null}
+        {loading ? <div className="space-y-2">{[0, 1, 2].map((item) => <Skeleton key={item} className="h-28 w-full" />)}</div> : null}
         <SearchResults
           response={response}
           onSave={saveResult}
@@ -193,18 +208,63 @@ export default function LawyerSearchPage() {
           getSavedItemId={getSavedItemId}
         />
         {response ? (
-          <div className="toolbar">
-            <button type="button" disabled={!canPageBack || loading} onClick={() => runSearch(Math.max(0, offset - response.limit))}>
+          <div className="flex gap-2">
+            <Button variant="outline" type="button" disabled={!canPageBack || loading} onClick={() => runSearch(Math.max(0, offset - response.limit))}>
               Previous page
-            </button>
-            <button type="button" disabled={!canPageForward || loading} onClick={() => runSearch(offset + response.limit)}>
+            </Button>
+            <Button variant="outline" type="button" disabled={!canPageForward || loading} onClick={() => runSearch(offset + response.limit)}>
               Next page
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
     </RoleGuard>
   );
+}
+
+function SearchField({ label, children }: Readonly<{ label: string; children: React.ReactNode }>) {
+  return (
+    <div className="min-w-0 flex-1 space-y-1.5">
+      <Label className="text-xs font-semibold tracking-wide">{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options
+}: Readonly<{
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+}>) {
+  return (
+    <div className="w-full space-y-1.5 lg:w-40">
+      <Label className="text-xs font-semibold tracking-wide">{label}</Label>
+      <Select value={value} onValueChange={(next) => onChange(next ?? options[0] ?? "ANY")}>
+        <SelectTrigger className="h-[34px] w-full bg-[#fffdf8]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {formatOption(option)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function formatOption(value: string) {
+  if (value === "ANY") return "Any";
+  if (value === "DEFAULT") return "Verified + pending";
+  return value.replaceAll("_", " ").toLowerCase().replace(/^./, (character) => character.toUpperCase());
 }
 
 function payloadForSearchResult(result: SearchResult): SavedItemCreatePayload | null {

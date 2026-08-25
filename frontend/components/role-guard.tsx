@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { me } from "@/lib/api";
-import { canAccessRoute, clearSession, getStoredRole, getToken, setSession } from "@/lib/auth";
+import { canAccessRoute, clearSession, getStoredRole, getToken } from "@/lib/auth";
 import type { Role } from "@/lib/types";
 
 export function RoleGuard({
@@ -22,6 +22,7 @@ export function RoleGuard({
   const router = useRouter();
 
   useEffect(() => {
+    let cancelled = false;
     const token = getToken();
     if (!token) {
       setRole(null);
@@ -32,14 +33,20 @@ export function RoleGuard({
     setRole(getStoredRole());
     me()
       .then((user) => {
-        setSession(token, user.role);
+        if (cancelled) return;
         setRole(user.role);
       })
       .catch(() => {
+        if (cancelled) return;
         clearSession();
         setRole(null);
       })
-      .finally(() => setChecking(false));
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [pathname, router]);
 
   if (checking) {

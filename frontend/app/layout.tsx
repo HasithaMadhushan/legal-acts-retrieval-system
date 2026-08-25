@@ -1,17 +1,23 @@
 import type { Metadata } from "next";
-import { Newsreader, Source_Sans_3 } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthAwareShell } from "@/components/auth/auth-aware-shell";
 import { cn } from "@/lib/utils";
+import { Toaster } from "@/components/ui/sonner";
 
-const sourceSans = Source_Sans_3({
-  subsets: ["latin"],
+/** Self-hosted so `next build` works offline (no fonts.googleapis.com). */
+const sourceSans = localFont({
+  src: "./fonts/source-sans-3-latin.woff2",
   variable: "--font-sans",
+  weight: "200 900",
+  display: "swap",
 });
 
-const newsreader = Newsreader({
-  subsets: ["latin"],
+const newsreader = localFont({
+  src: "./fonts/newsreader-latin.woff2",
   variable: "--font-serif",
+  weight: "200 800",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -24,6 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={cn("font-sans", sourceSans.variable, newsreader.variable)}>
       <body>
         <AuthAwareShell>{children}</AuthAwareShell>
+        <Toaster position="top-right" richColors />
       </body>
     </html>
   );

@@ -31,7 +31,7 @@ def test_docling_parser_uses_document_converter(monkeypatch, tmp_path):
         pages = {1: object(), 2: object()}
 
         def export_to_markdown(self):
-            return "# Test Legal Act\n\n1. Short title."
+            return "# Test Legal Act\n\n**1.** Short title."
 
     class FakeResult:
         document = FakeDocument()
@@ -47,7 +47,7 @@ def test_docling_parser_uses_document_converter(monkeypatch, tmp_path):
 
     assert parsed.parser_name == "DOCLING"
     assert parsed.page_count == 2
-    assert parsed.full_text == "# Test Legal Act\n\n1. Short title."
+    assert parsed.full_text == "Test Legal Act\n\n1. Short title."
     assert parsed.warnings == []
 
 

@@ -20,7 +20,7 @@ export default function ActDetailPage({ params }: { params: Promise<{ id: string
   const [sections, setSections] = useState<Section[]>([]);
   const [references, setReferences] = useState<LegalReference[]>([]);
   const [role, setRole] = useState<Role | null>(null);
-  const [tab, setTab] = useState<ActTab>("overview");
+  const [tab, setTab] = useState<ActTab>("references");
   const [error, setError] = useState("");
 
   useRecordReading({ item_type: "ACT", act_id: id });
@@ -61,18 +61,27 @@ export default function ActDetailPage({ params }: { params: Promise<{ id: string
         / {act.title}
       </p>
 
-      <div className="flex flex-col gap-3">
-        <h1 className="font-serif text-3xl font-semibold tracking-tight">{act.title}</h1>
+      <div className="flex flex-col gap-2">
+        <h1 className="font-serif text-[30px] font-semibold tracking-[-0.45px] text-[#0b1626]">{act.title}</h1>
         <div className="flex flex-wrap items-center gap-3">
           {act.processing_status === "VERIFIED" ? <VerifiedBadge /> : null}
           {meta ? <span className="text-sm text-muted-foreground">{meta}</span> : null}
         </div>
+        {role === "ADMIN" || role === "LAWYER" ? (
+          <div className="mt-1">
+            <Link
+              href={`/lawyer/relationships?actId=${act.id}`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Open relationship explorer
+            </Link>
+          </div>
+        ) : null}
       </div>
 
-      <ResearchNotice />
-      <OfficialSourceBlock act={act} />
+      <OfficialSourceBlock act={act} className="rounded-lg px-5 py-5 shadow-[0_1px_2px_rgba(15,32,51,0.04)]" />
 
-      <div className="flex flex-wrap gap-1 border-b border-border">
+      <div className="flex flex-wrap gap-5 border-b border-border">
         {(
           [
             ["overview", "Overview"],
@@ -84,9 +93,9 @@ export default function ActDetailPage({ params }: { params: Promise<{ id: string
             key={value}
             type="button"
             className={cn(
-              "rounded-t-sm px-3.5 py-2 text-sm font-medium",
+              "relative px-3 py-2.5 text-sm font-medium",
               tab === value
-                ? "border border-b-0 border-border bg-card text-foreground"
+                ? "text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-[color:var(--gold)]"
                 : "text-muted-foreground hover:text-foreground"
             )}
             onClick={() => setTab(value)}
@@ -97,7 +106,7 @@ export default function ActDetailPage({ params }: { params: Promise<{ id: string
       </div>
 
       {tab === "overview" ? (
-        <section className="rounded-sm border border-border bg-card p-4 text-sm leading-relaxed text-foreground">
+        <section className="rounded-lg border border-border bg-card p-5 text-sm leading-relaxed text-foreground">
           {act.raw_text?.trim() ? (
             <p className="whitespace-pre-wrap">{act.raw_text.slice(0, 1800)}{act.raw_text.length > 1800 ? "…" : ""}</p>
           ) : (
@@ -122,7 +131,7 @@ export default function ActDetailPage({ params }: { params: Promise<{ id: string
       ) : null}
 
       {tab === "sections" ? (
-        <section className="overflow-hidden rounded-sm border border-border">
+        <section className="overflow-hidden rounded-lg border border-border bg-card">
           {sections.map((section) => (
             <Link
               key={section.id}
@@ -151,34 +160,60 @@ export default function ActDetailPage({ params }: { params: Promise<{ id: string
               Outgoing and incoming statutory relationships verified for this Act.
             </p>
           </div>
-          <div className="overflow-hidden rounded-sm border border-border">
-            {verifiedReferences.map((reference) => (
-              <article key={reference.id} className="flex items-center gap-3 border-b border-border px-4 py-3 first:border-t">
-                <span className="rounded-sm border border-border px-2 py-0.5 text-[10px] font-semibold uppercase">
-                  {reference.target_act_id === act.id ? "IN" : "OUT"}
-                </span>
-                <p className="min-w-0 flex-1 text-sm">
-                  {reference.source_section_id ? `Section ${reference.target_section_number ?? "?"}` : reference.raw_reference_text}{" "}
-                  {reference.relationship_type.replaceAll("_", " ").toLowerCase()} →{" "}
-                  {reference.target_act_title_raw ?? "Mapped target"}
-                </p>
-                {reference.target_section_id ? (
-                  <Link href={`/sections/${reference.target_section_id}`} className="text-sm text-primary no-underline hover:underline">
-                    Open →
-                  </Link>
-                ) : reference.target_act_id ? (
-                  <Link href={`/acts/${reference.target_act_id}`} className="text-sm text-primary no-underline hover:underline">
-                    Open →
-                  </Link>
-                ) : null}
-              </article>
-            ))}
-            {!verifiedReferences.length ? (
-              <p className="px-4 py-6 text-sm text-muted-foreground">No verified relationships are available yet.</p>
-            ) : null}
-          </div>
+          {verifiedReferences.length ? (
+            <div className="flex flex-col gap-3">
+              <div className="overflow-x-auto rounded-lg border border-border bg-card px-5 py-5">
+                <div className="flex min-w-[620px] items-center justify-center gap-3">
+                  <ReferenceNode label={verifiedReferences[0]?.target_act_title_raw ?? "Principal enactment"} muted />
+                  <span className="text-xs font-medium text-[#92681f]">amended by →</span>
+                  <ReferenceNode label={act.title} focus />
+                  <span className="text-xs font-medium text-[#92681f]">refers to →</span>
+                  <ReferenceNode label={verifiedReferences[1]?.target_act_title_raw ?? "Mapped target"} muted />
+                </div>
+              </div>
+              {verifiedReferences.map((reference) => (
+                <ReferenceCard key={reference.id} reference={reference} actId={act.id} />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">No verified relationships are available yet.</p>
+          )}
+          <ResearchNotice>
+            Sign in as a Lawyer to save references to your workspace or export summaries. This system provides information retrieval support only.
+          </ResearchNotice>
         </section>
       ) : null}
     </div>
+  );
+}
+
+function ReferenceNode({ label, focus = false, muted = false }: { label: string; focus?: boolean; muted?: boolean }) {
+  return (
+    <div className={cn("max-w-[230px] rounded-md border bg-card px-4 py-3", focus ? "border-[#b8955a]" : "border-border", muted && "text-muted-foreground")}>
+      <p className="line-clamp-2 font-serif text-sm font-semibold">{label}</p>
+    </div>
+  );
+}
+
+function ReferenceCard({ reference, actId }: { reference: LegalReference; actId: string }) {
+  const incoming = reference.target_act_id === actId;
+  const targetHref = reference.target_section_id
+    ? `/sections/${reference.target_section_id}`
+    : reference.target_act_id
+      ? `/acts/${reference.target_act_id}`
+      : null;
+  return (
+    <article className="flex items-start gap-3 rounded-lg border border-[#22684a] bg-card px-4 py-3.5">
+      <span className="rounded-md bg-muted px-2 py-1 text-[10px] font-semibold uppercase">{incoming ? "IN" : "OUT"}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">
+          {reference.source_section_id ? `Section ${reference.target_section_number ?? "?"}` : reference.raw_reference_text}{" "}
+          {reference.relationship_type.replaceAll("_", " ").toLowerCase()} →{" "}
+          <strong>{reference.target_act_title_raw ?? "Mapped target"}</strong>
+        </p>
+        <p className="mt-1.5 text-xs text-muted-foreground">Verified span · confidence {reference.confidence_score.toFixed(2)}</p>
+      </div>
+      {targetHref ? <Link href={targetHref} className="shrink-0 text-sm font-medium text-primary hover:underline">Open →</Link> : null}
+    </article>
   );
 }

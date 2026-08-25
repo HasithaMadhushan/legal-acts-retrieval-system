@@ -1,9 +1,15 @@
 from pathlib import Path
 
-from app.core.roles import ProcessingStatus, RelationshipType, VerificationStatus
+from app.core.roles import (
+    ProcessingJobStatus,
+    ProcessingStatus,
+    RelationshipType,
+    VerificationStatus,
+)
 from app.db.session import SessionLocal
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
+from app.models.processing_job import ProcessingJob
 from app.services.text_cleaner import normalize_for_search
 
 VALID_PDF = b"%PDF-1.4\n% test legal act pdf\n"
@@ -106,3 +112,48 @@ def test_delete_referenced_act_returns_409(client, admin_token):
     )
     assert response.status_code == 409
     assert "referenced by other Acts" in response.json()["detail"]
+
+
+def test_delete_act_allows_its_own_self_mapped_references(client, admin_token):
+    with SessionLocal() as db:
+        act = LegalAct(
+            title="Self Referencing Act",
+            normalized_title=normalize_for_search("Self Referencing Act"),
+            source_file_name="self.pdf",
+            stored_file_path="self.pdf",
+            file_sha256="c" * 64,
+            processing_status=ProcessingStatus.PROCESSED,
+        )
+        db.add(act)
+        db.flush()
+        db.add(
+            LegalReference(
+                source_act_id=act.id,
+                raw_reference_text="section 2 of this Act",
+                context_snippet="Section 1 refers to section 2 of this Act.",
+                relationship_type=RelationshipType.REFERS_TO,
+                target_act_id=act.id,
+                verification_status=VerificationStatus.PENDING,
+            )
+        )
+        db.add(
+            ProcessingJob(
+                act_id=act.id,
+                status=ProcessingJobStatus.COMPLETED,
+                current_step="Completed",
+                progress_percent=100,
+            )
+        )
+        db.commit()
+        act_id = act.id
+
+    response = client.delete(
+        f"/api/v1/acts/{act_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200
+    with SessionLocal() as db:
+        assert db.get(LegalAct, act_id) is None
+        assert db.query(LegalReference).filter_by(source_act_id=act_id).count() == 0
+        assert db.query(ProcessingJob).filter_by(act_id=act_id).count() == 0

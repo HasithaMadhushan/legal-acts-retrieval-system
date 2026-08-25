@@ -35,6 +35,25 @@ Source text:
 JsonCaller = Callable[[str], dict[str, Any]]
 
 
+def _post_json_with_retry(url: str, **kwargs):
+    """POST once, retrying one transient network or provider failure."""
+    import httpx
+
+    for attempt in range(2):
+        try:
+            response = httpx.post(url, **kwargs)
+        except (httpx.TimeoutException, httpx.NetworkError):
+            if attempt == 1:
+                raise
+            continue
+        status_code = getattr(response, "status_code", 200)
+        if attempt == 0 and (status_code == 429 or status_code >= 500):
+            continue
+        response.raise_for_status()
+        return response
+    raise RuntimeError("LLM request failed without a response.")
+
+
 class LlmReferenceItem(BaseModel):
     raw_text: str = Field(min_length=3, max_length=1000)
     relationship: str = RelationshipType.REFERS_TO.value
@@ -63,7 +82,16 @@ class LlmReferencePayload(BaseModel):
 
 
 def _content_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    settings = get_settings()
+    cache_material = "\n".join(
+        (
+            "legal-reference-schema-v1",
+            settings.llm_provider.strip().lower(),
+            settings.llm_model.strip(),
+            text,
+        )
+    )
+    return hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
 
 
 def _source_numbers(text: str) -> set[str]:
@@ -86,7 +114,7 @@ def _fetch_llm_payload(
             text=text[:8000],
         )
         try:
-            payload = (caller or _call_gemini)(prompt)
+            payload = (caller or call_llm_json)(prompt)
         except Exception:
             logger.warning("llm_extraction_failed", exc_info=True)
             return None
@@ -163,24 +191,121 @@ def _is_invented_number(item: LlmReferenceItem, allowed_numbers: set[str]) -> bo
     return False
 
 
+def call_llm_json(prompt: str) -> dict[str, Any]:
+    """Call the configured provider and return the shared extraction payload."""
+    settings = get_settings()
+    provider = settings.llm_provider.strip().lower().replace("-", "_")
+    if provider == "gemini":
+        return _call_gemini(prompt)
+    if provider == "openai":
+        return _call_openai_compatible(
+            prompt,
+            base_url="https://api.openai.com/v1",
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+        )
+    if provider == "anthropic":
+        return _call_anthropic(prompt)
+    if provider == "mistral":
+        return _call_openai_compatible(
+            prompt,
+            base_url="https://api.mistral.ai/v1",
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+        )
+    if provider == "openai_compatible":
+        if not settings.llm_base_url:
+            raise RuntimeError("LLM_BASE_URL is required for an OpenAI-compatible provider.")
+        return _call_openai_compatible(
+            prompt,
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+        )
+    raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+
+
 def _call_gemini(prompt: str) -> dict[str, Any]:
     settings = get_settings()
     if not settings.llm_api_key:
         raise RuntimeError("LLM API key is not configured.")
-    import httpx
-
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{settings.llm_model}:generateContent"
     )
-    response = httpx.post(
+    response = _post_json_with_retry(
         url,
         params={"key": settings.llm_api_key},
-        json={"contents": [{"parts": [{"text": prompt}]}]},
+        json={
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseJsonSchema": LlmReferencePayload.model_json_schema(),
+                "temperature": 0,
+            },
+        },
         timeout=20.0,
     )
-    response.raise_for_status()
     data = response.json()
     text = data["candidates"][0]["content"]["parts"][0]["text"]
     text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(text)
+
+
+def _call_openai_compatible(
+    prompt: str,
+    *,
+    base_url: str,
+    api_key: str | None,
+    model: str,
+) -> dict[str, Any]:
+    if not api_key:
+        raise RuntimeError("LLM API key is not configured.")
+    response = _post_json_with_retry(
+        f"{base_url.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "legal_references",
+                    "strict": True,
+                    "schema": LlmReferencePayload.model_json_schema(),
+                },
+            },
+        },
+        timeout=20.0,
+    )
+    data = response.json()
+    return json.loads(data["choices"][0]["message"]["content"])
+
+
+def _call_anthropic(prompt: str) -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.llm_api_key:
+        raise RuntimeError("LLM API key is not configured.")
+    response = _post_json_with_retry(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": settings.llm_api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": settings.llm_model,
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": prompt}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": LlmReferencePayload.model_json_schema(),
+                }
+            },
+        },
+        timeout=20.0,
+    )
+    data = response.json()
+    text_block = next(item for item in data["content"] if item.get("type") == "text")
+    return json.loads(text_block["text"])

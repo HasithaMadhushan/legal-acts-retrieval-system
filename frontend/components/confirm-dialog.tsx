@@ -1,7 +1,17 @@
 "use client";
 
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 type ConfirmDialogProps = Readonly<{
   title: string;
@@ -24,34 +34,23 @@ export function ConfirmDialog({
   triggerLabel,
   triggerClassName
 }: ConfirmDialogProps) {
-  const [open, setOpen] = useState(false);
-
-  async function confirm() {
-    await onConfirm();
-    setOpen(false);
-  }
-
   return (
-    <>
-      <Button type="button" variant="outline" className={triggerClassName} onClick={() => setOpen(true)}>
+    <AlertDialog>
+      <AlertDialogTrigger render={<Button type="button" variant="outline" className={triggerClassName} />}>
         {triggerLabel}
-      </Button>
-      {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-sm border border-border bg-card p-5 shadow-lg">
-            <h2 className="font-serif text-xl font-semibold">{title}</h2>
-            <p className="mt-2 text-sm text-muted-foreground">{description}</p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-                Cancel
-              </Button>
-              <Button type="button" onClick={() => void confirm()} disabled={pending}>
-                {pending ? pendingLabel : confirmLabel}
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </>
+      </AlertDialogTrigger>
+      <AlertDialogContent className="rounded-lg">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="font-serif text-xl">{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogAction type="button" disabled={pending} onClick={() => void onConfirm()}>
+            {pending ? pendingLabel : confirmLabel}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

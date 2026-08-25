@@ -93,6 +93,31 @@ Forms
     assert result.summary["schedules_detected"] == 1
 
 
+def test_schedule_references_in_body_do_not_become_schedule_identifiers():
+    text = """1. Processing duties.
+Schedule I or under item (a) of Schedule II hereto, processing may be based on consent.
+
+2. Further duties.
+The controller shall comply with this section.
+
+FIRST SCHEDULE
+Required particulars.
+"""
+
+    result = segment_act_text(text)
+    main_sections = [
+        section for section in result.sections if section.section_type == SectionType.SECTION
+    ]
+    schedules = [
+        section for section in result.sections if section.section_type == SectionType.SCHEDULE
+    ]
+
+    assert [section.section_number for section in main_sections] == ["1", "2"]
+    assert [section.section_number for section in schedules] == ["FIRST SCHEDULE"]
+    assert "Schedule I or under item" in main_sections[0].text
+    assert all(len(section.section_number) <= 50 for section in result.sections)
+
+
 def test_cover_and_publication_text_is_not_treated_as_section_body():
     text = """PARLIAMENT OF THE DEMOCRATIC SOCIALIST REPUBLIC OF SRI LANKA
 POISONS, OPIUM AND DANGEROUS DRUGS (AMENDMENT) ACT

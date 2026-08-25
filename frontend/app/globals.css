@@ -6,31 +6,31 @@
 
 :root {
   /* Legal gazette theme — aligned to Figma Legal Acts tokens */
-  --background: #f3ede0;
-  --foreground: #12233a;
-  --card: #fcfaf4;
-  --card-foreground: #12233a;
-  --popover: #fcfaf4;
-  --popover-foreground: #12233a;
-  --primary: #1e3a5f;
-  --primary-foreground: #fcfaf4;
-  --secondary: #e6edf4;
-  --secondary-foreground: #1e3a5f;
-  --muted: #e6edf4;
-  --muted-foreground: #5a6573;
+  --background: #f4f1ea;
+  --foreground: #0b1626;
+  --card: #fffefb;
+  --card-foreground: #14263c;
+  --popover: #fffefb;
+  --popover-foreground: #14263c;
+  --primary: #14263c;
+  --primary-foreground: #fffefb;
+  --secondary: #e9eef4;
+  --secondary-foreground: #14263c;
+  --muted: #ede8db;
+  --muted-foreground: #626b78;
   --accent: #f6ebd4;
   --accent-foreground: #5c430e;
   --destructive: #7a1f2b;
-  --border: #d3c6ae;
-  --input: #d3c6ae;
-  --ring: #c6a15b;
+  --border: #e4ddcd;
+  --input: #e4ddcd;
+  --ring: #b8955a;
   --chart-1: #1e3a5f;
   --chart-2: #c6a15b;
   --chart-3: #7a1f2b;
   --chart-4: #1f5a3c;
   --chart-5: #8f6b2a;
-  --radius: 0.125rem;
-  --sidebar: #10243a;
+  --radius: 0.5rem;
+  --sidebar: #0b1626;
   --sidebar-foreground: #fcfaf4;
   --sidebar-primary: #c6a15b;
   --sidebar-primary-foreground: #10243a;
@@ -40,13 +40,13 @@
   --sidebar-ring: #c6a15b;
 
   /* Legacy app aliases used by existing CSS */
-  --surface: #fcfaf4;
-  --text: #12233a;
+  --surface: #fffefb;
+  --text: #14263c;
   --primary-weak: #e6edf4;
   --danger: #7a1f2b;
   --warning: #8f6b2a;
-  --success: #1f5a3c;
-  --gold: #c6a15b;
+  --success: #22684a;
+  --gold: #b8955a;
   --burgundy: #7a1f2b;
   --ink: #0c1a2b;
 }
@@ -62,9 +62,10 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans), "Source Sans 3", system-ui, sans-serif;
+  line-height: 1.45;
 }
 
-a {
+a:not([data-slot="button"]) {
   color: inherit;
 }
 
