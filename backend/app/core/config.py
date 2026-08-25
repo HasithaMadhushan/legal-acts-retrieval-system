@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     docling_enabled: bool = True
     docling_timeout_seconds: int = 60
     ocr_enabled: bool = False
-    doc_parser_primary: str = "pdf_inspector"
+    doc_parser_primary: str = "pymupdf"
     # Alembic is the schema source of truth. The app runs migrations at startup so
     # local dev keeps "just works" behavior; tests disable this and manage the
     # schema directly via Base.metadata for speed and per-test isolation.

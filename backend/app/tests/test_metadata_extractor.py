@@ -53,6 +53,46 @@ def test_falls_back_to_filename_when_title_is_uncertain():
     assert "source filename" in metadata.warnings[0]
 
 
+def test_rejects_documents_gov_lk_download_footer_as_act_title():
+    metadata = extract_metadata(
+        "This Act can be downloaded from www.documents.gov.lk",
+        "value_added_tax_amendment_act.pdf",
+    )
+
+    assert metadata.title == "value added tax amendment act"
+    assert metadata.confidence_score < 0.5
+    assert "source filename" in metadata.warnings[0]
+
+
+def test_uses_combined_gazette_header_instead_of_download_footer():
+    metadata = extract_metadata(
+        """
+        PARLIAMENT OF THE DEMOCRATIC SOCIALIST REPUBLIC OF SRI LANKA
+        ANTI-CORRUPTION ACT, No. 9 OF 2023
+        This Act can be downloaded from www.documents.gov.lk
+        """,
+        "anti-corruption-act-9-of-2023.pdf",
+    )
+
+    assert metadata.title == "Anti-Corruption Act"
+    assert metadata.act_number == "9"
+    assert metadata.year == 2023
+
+
+def test_joins_split_gazette_title_before_act_number():
+    metadata = extract_metadata(
+        """
+        ANTI - CORRUPTION (AMENDMENT)
+        ACT, No. 28 OF 2023
+        This Act can be downloaded from www.documents.gov.lk
+        AN ACT TO AMEND THE ANTI-CORRUPTION ACT, NO. 9 OF 2023
+        """,
+        "anti-corruption-amendment-act-28-of-2023.pdf",
+    )
+
+    assert metadata.title == "Anti-Corruption (Amendment) Act"
+
+
 def test_recognizes_ordinance_titles_not_just_act_titles():
     """F-010 regression: colonial-era Sri Lankan enactments are titled
     "... Ordinance", not "... Act", but are still in force and still amended

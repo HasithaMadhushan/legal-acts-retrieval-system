@@ -4,6 +4,7 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_legal_acts.db"
 os.environ["SECRET_KEY"] = "test-secret"
 os.environ["UPLOAD_DIR"] = "test_uploads"
 os.environ["DOC_PARSER_PRIMARY"] = "pymupdf"
+os.environ["PDF_INSPECTOR_ENABLED"] = "false"
 os.environ["DOCLING_ENABLED"] = "false"
 # Tests manage the schema directly via create_all (see init_db) for speed and
 # per-test isolation; Alembic migrations are exercised separately.
