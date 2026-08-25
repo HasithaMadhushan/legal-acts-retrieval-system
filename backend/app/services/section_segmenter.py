@@ -6,8 +6,10 @@ from app.services.text_cleaner import normalize_for_search
 
 SECTION_START_RE = re.compile(r"(?m)^\s*(?P<number>\d{1,3}[A-Z]?)\.\s*(?P<heading>.*)$")
 SCHEDULE_RE = re.compile(
-    r"(?im)^\s*((FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH)\s+)?"
-    r"SCHEDULE\b.*$"
+    r"(?im)^\s*(?P<number>"
+    r"(?:(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH)\s+)?"
+    r"SCHEDULE(?:\s+(?:[IVXLCDM]+|\d+))?"
+    r")\s*$"
 )
 PART_RE = re.compile(r"(?im)^\s*PART\s+[IVXLCDM]+\b.*$")
 COVER_LINE_RE = re.compile(
@@ -161,7 +163,7 @@ def _find_boundaries(text: str) -> list[_Boundary]:
         )
 
     for match in schedule_matches:
-        line = match.group(0).strip()
+        line = match.group("number").strip()
         boundaries.append(
             _Boundary(
                 start=match.start(),

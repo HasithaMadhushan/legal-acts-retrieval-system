@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -31,8 +31,17 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [showExpiredNotice, setShowExpiredNotice] = useState(false);
   const registered = searchParams.get("registered") === "1";
   const reset = searchParams.get("reset") === "1";
+
+  useEffect(() => {
+    if (searchParams.get("expired") !== "1") return;
+    setShowExpiredNotice(true);
+    const next = searchParams.get("next");
+    const cleanUrl = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
+    router.replace(cleanUrl);
+  }, [router, searchParams]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -57,9 +66,11 @@ function LoginForm() {
 
   return (
     <AuthLayout
-      kicker="Gazette access"
-      title="Sign in"
-      description="Enter your email and password to continue."
+      kicker="Welcome back"
+      title="Sign in to your legal research workspace"
+      description="Search verified English Sri Lankan Acts, inspect section-level references, and continue your research."
+      marketingTitle="Find the provision. Follow the relationship."
+      marketingBody="Search verified English Acts at section level and trace amendments, repeals, substitutions, insertions and cross-references."
     >
       <form className="flex flex-col gap-5" onSubmit={submit}>
         <FieldGroup>
@@ -71,6 +82,11 @@ function LoginForm() {
           {reset ? (
             <Alert>
               <AlertDescription>Password updated. Sign in with your new password.</AlertDescription>
+            </Alert>
+          ) : null}
+          {showExpiredNotice ? (
+            <Alert variant="destructive">
+              <AlertDescription>Session expired — sign in again.</AlertDescription>
             </Alert>
           ) : null}
           {error ? (

@@ -26,6 +26,7 @@ def search(
     relationship_type: RelationshipType | None = None,
     verification_status: VerificationStatus | None = None,
     mapped_status: str | None = None,
+    search_mode: str = "all",
     limit: int = 25,
     offset: int = 0,
 ) -> SearchResponse:
@@ -48,22 +49,31 @@ def search(
         mapped_status=mapped_status,
     )
 
+    if search_mode == "semantic":
+        return _semantic_results(db, filters, role, limit=limit, offset=offset)
+
+    fetch_limit = offset + limit
     results: list[SearchResult] = []
+    act_count = section_count = 0
     if not (relationship_type or mapped_status):
-        results.extend(_act_results(db, filters, role))
-        results.extend(_section_results(db, filters, role))
-    results.extend(_reference_results(db, filters, role))
+        act_count, act_rows = _act_results(db, filters, role, fetch_limit)
+        section_count, section_rows = _section_results(db, filters, role, fetch_limit)
+        results.extend(act_rows)
+        results.extend(section_rows)
+    ref_count, ref_rows = _reference_results(db, filters, role, fetch_limit)
+    results.extend(ref_rows)
 
     results.sort(key=lambda item: (-item.score, item.result_type, item.title, item.id))
     paged_results = results[offset : offset + limit]
+    total_results = act_count + section_count + ref_count
 
     return SearchResponse(
         query=query,
         results=paged_results,
-        total_results=len(results),
-        act_results=sum(1 for result in results if result.result_type == "ACT"),
-        section_results=sum(1 for result in results if result.result_type == "SECTION"),
-        reference_results=sum(1 for result in results if result.result_type == "REFERENCE"),
+        total_results=total_results,
+        act_results=act_count,
+        section_results=section_count,
+        reference_results=ref_count,
         limit=limit,
         offset=offset,
         disclaimer=LEGAL_DISCLAIMER,
@@ -102,7 +112,9 @@ class _SearchFilters:
         return bool(self.normalized_query)
 
 
-def _act_results(db: Session, filters: _SearchFilters, role: UserRole) -> list[SearchResult]:
+def _act_results(
+    db: Session, filters: _SearchFilters, role: UserRole, fetch_limit: int
+) -> tuple[int, list[SearchResult]]:
     query = _apply_act_filters(db.query(LegalAct), filters, role)
     if filters.has_query:
         conditions = [
@@ -122,8 +134,9 @@ def _act_results(db: Session, filters: _SearchFilters, role: UserRole) -> list[S
         else:
             conditions.append(LegalAct.raw_text.ilike(filters.raw_like))
         query = query.filter(or_(*conditions))
+    total = query.count()
     results: list[SearchResult] = []
-    for act in query.limit(250):
+    for act in query.limit(fetch_limit):
         results.append(
             SearchResult(
                 result_type="ACT",
@@ -150,10 +163,12 @@ def _act_results(db: Session, filters: _SearchFilters, role: UserRole) -> list[S
                 score=_act_score(act, filters, role),
             )
         )
-    return results
+    return total, results
 
 
-def _section_results(db: Session, filters: _SearchFilters, role: UserRole) -> list[SearchResult]:
+def _section_results(
+    db: Session, filters: _SearchFilters, role: UserRole, fetch_limit: int
+) -> tuple[int, list[SearchResult]]:
     query = _apply_section_visibility(db.query(ActSection).join(LegalAct), role)
     query = _apply_joined_act_filters(query, filters, role)
     if filters.verification_status and role != UserRole.GENERAL_USER:
@@ -170,8 +185,9 @@ def _section_results(db: Session, filters: _SearchFilters, role: UserRole) -> li
         else:
             conditions.append(ActSection.normalized_text.ilike(filters.like))
         query = query.filter(or_(*conditions))
+    total = query.count()
     results: list[SearchResult] = []
-    for section in query.limit(500):
+    for section in query.limit(fetch_limit):
         results.append(
             SearchResult(
                 result_type="SECTION",
@@ -190,10 +206,12 @@ def _section_results(db: Session, filters: _SearchFilters, role: UserRole) -> li
                 score=_section_score(section, filters, role),
             )
         )
-    return results
+    return total, results
 
 
-def _reference_results(db: Session, filters: _SearchFilters, role: UserRole) -> list[SearchResult]:
+def _reference_results(
+    db: Session, filters: _SearchFilters, role: UserRole, fetch_limit: int
+) -> tuple[int, list[SearchResult]]:
     query = _apply_reference_visibility(
         db.query(LegalReference).join(LegalAct, LegalReference.source_act_id == LegalAct.id),
         role,
@@ -228,8 +246,9 @@ def _reference_results(db: Session, filters: _SearchFilters, role: UserRole) -> 
         if filters.query_relationship:
             conditions.append(LegalReference.relationship_type == filters.query_relationship)
         query = query.filter(or_(*conditions))
+    total = query.count()
     results: list[SearchResult] = []
-    for reference in query.limit(500):
+    for reference in query.limit(fetch_limit):
         target_section = reference.target_section_number or reference.target_section_path
         results.append(
             SearchResult(
@@ -259,7 +278,61 @@ def _reference_results(db: Session, filters: _SearchFilters, role: UserRole) -> 
                 score=_reference_score(reference, filters, role),
             )
         )
-    return results
+    return total, results
+
+
+def _semantic_results(
+    db: Session,
+    filters: _SearchFilters,
+    role: UserRole,
+    *,
+    limit: int,
+    offset: int,
+) -> SearchResponse:
+    from app.services.embedding_service import cosine_similarity, embed_text
+
+    query = _apply_section_visibility(db.query(ActSection).join(LegalAct), role)
+    query = _apply_joined_act_filters(query, filters, role)
+    if filters.verification_status and role != UserRole.GENERAL_USER:
+        query = query.filter(ActSection.verification_status == filters.verification_status)
+    sections = query.filter(ActSection.embedding.is_not(None)).all()
+    query_vector = embed_text(filters.query)
+    scored: list[SearchResult] = []
+    for section in sections:
+        if not section.embedding:
+            continue
+        score = cosine_similarity(query_vector, section.embedding)
+        scored.append(
+            SearchResult(
+                result_type="SECTION",
+                id=section.id,
+                act_id=section.act_id,
+                section_id=section.id,
+                title=section.act.title,
+                act_number=section.act.act_number,
+                year=section.act.year,
+                category=section.act.category,
+                processing_status=section.act.processing_status,
+                section_number=section.section_number,
+                section_heading=section.heading,
+                snippet=_snippet(section.text, filters.query),
+                verification_status=section.verification_status,
+                score=round(max(score, 0.0) * 100, 2),
+            )
+        )
+    scored.sort(key=lambda item: (-item.score, item.title, item.id))
+    paged = scored[offset : offset + limit]
+    return SearchResponse(
+        query=filters.query,
+        results=paged,
+        total_results=len(scored),
+        act_results=0,
+        section_results=len(scored),
+        reference_results=0,
+        limit=limit,
+        offset=offset,
+        disclaimer=LEGAL_DISCLAIMER,
+    )
 
 
 def _is_postgres(db: Session) -> bool:

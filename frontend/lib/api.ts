@@ -1,4 +1,4 @@
-import { getToken } from "@/lib/auth";
+import { clearSession, getToken } from "@/lib/auth";
 import type {
   LegalAct,
   LegalReference,
@@ -32,6 +32,37 @@ function defaultApiBase() {
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? defaultApiBase()).replace(/\/$/, "");
 
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+const ME_TTL_MS = 5 * 60 * 1000;
+let meCache: { at: number; user: User & { disclaimer: string } } | null = null;
+
+export function clearMeCache() {
+  meCache = null;
+}
+
+const AUTH_PAGE_PREFIXES = ["/login", "/register", "/forgot-password", "/reset-password"];
+
+export function redirectIfUnauthorized(status: number, apiPath: string) {
+  if (status !== 401 || typeof window === "undefined") return;
+  if (apiPath.startsWith("/auth/login") || apiPath.startsWith("/auth/register")) return;
+  clearSession();
+  clearMeCache();
+  if (apiPath.startsWith("/auth/me")) return;
+  const path = window.location.pathname;
+  if (AUTH_PAGE_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) return;
+  const next = `${window.location.pathname}${window.location.search}`;
+  window.location.assign(`/login?next=${encodeURIComponent(next)}&expired=1`);
+}
+
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const token = getToken();
@@ -57,7 +88,9 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     } catch {
       // Keep fallback detail.
     }
-    throw new Error(detail);
+    const error = new ApiError(response.status, detail);
+    redirectIfUnauthorized(response.status, path);
+    throw error;
   }
   if (response.status === 204) return undefined as T;
   const contentType = response.headers.get("content-type") ?? "";
@@ -110,7 +143,10 @@ export async function rejectLawyerRequest(userId: string) {
 }
 
 export async function me() {
-  return apiFetch<User & { disclaimer: string }>("/auth/me");
+  if (meCache && Date.now() - meCache.at < ME_TTL_MS) return meCache.user;
+  const user = await apiFetch<User & { disclaimer: string }>("/auth/me");
+  meCache = { at: Date.now(), user };
+  return user;
 }
 
 export async function listActs() {
@@ -147,6 +183,10 @@ export async function updateAct(id: string, payload: Partial<LegalAct>) {
     method: "PATCH",
     body: JSON.stringify(payload)
   });
+}
+
+export async function deleteAct(id: string) {
+  return apiFetch<{ detail: string }>(`/acts/${id}`, { method: "DELETE" });
 }
 
 export async function uploadAct(formData: FormData) {
@@ -300,6 +340,20 @@ export async function listEvaluationRuns() {
 
 export async function listUsers() {
   return apiFetch<User[]>("/users");
+}
+
+export async function updateUser(
+  id: string,
+  payload: Partial<Pick<User, "role" | "is_active" | "full_name">>
+) {
+  return apiFetch<User>(`/users/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deactivateUser(id: string) {
+  return apiFetch<User>(`/users/${id}`, { method: "DELETE" });
 }
 
 export function exportUrl(path: string) {

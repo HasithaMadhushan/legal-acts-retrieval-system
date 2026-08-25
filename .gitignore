@@ -11,6 +11,8 @@ tsconfig.tsbuildinfo
 out/
 dist/
 coverage/
+playwright-report/
+test-results/
 *.tsbuildinfo
 
 .env
@@ -35,6 +37,7 @@ EVALUATION_GUIDE.md
 DEMO_SCRIPT.md
 PLAN_LEGAL_SYSTEM_AUDIT.md
 .cursor/
+.vscode/
 .agents/
 
 .DS_Store

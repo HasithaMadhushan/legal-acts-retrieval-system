@@ -54,6 +54,7 @@ def run_evaluation(
         run_name=payload.run_name,
         act_id=payload.act_id,
         section_segmentation_accuracy=payload.section_segmentation_accuracy,
+        extraction_mode=payload.extraction_mode,
     )
 
 

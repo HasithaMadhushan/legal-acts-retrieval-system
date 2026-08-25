@@ -254,6 +254,65 @@ def extract_references(text: str) -> list[ReferenceDraft]:
     return drafts
 
 
+_LLM_GATE_RE = re.compile(r"\b(act|chapter|section)\s+\d", re.IGNORECASE)
+
+
+def extract_references_hybrid(
+    text: str,
+    *,
+    llm_caller=None,
+) -> list[ReferenceDraft]:
+    """Regex first, then optional LLM merge. Fail open to regex on LLM errors."""
+    regex_drafts = extract_references(text)
+    from app.core.config import get_settings
+
+    if not get_settings().llm_extraction_enabled:
+        return regex_drafts
+    if not _LLM_GATE_RE.search(text or ""):
+        return regex_drafts
+    try:
+        from app.services.llm_reference_extractor import extract_references_with_llm
+
+        llm_drafts = extract_references_with_llm(text, caller=llm_caller)
+    except Exception:
+        return regex_drafts
+    return _merge_reference_drafts(regex_drafts, llm_drafts)
+
+
+def _fill_missing_targets(existing: ReferenceDraft, draft: ReferenceDraft) -> None:
+    if draft.relationship_type != RelationshipType.UNKNOWN:
+        existing.relationship_type = draft.relationship_type
+    if draft.target_act_title_raw and not existing.target_act_title_raw:
+        existing.target_act_title_raw = draft.target_act_title_raw
+    if draft.target_act_number and not existing.target_act_number:
+        existing.target_act_number = draft.target_act_number
+    if draft.target_act_year and not existing.target_act_year:
+        existing.target_act_year = draft.target_act_year
+    if draft.target_section_number and not existing.target_section_number:
+        existing.target_section_number = draft.target_section_number
+
+
+def _merge_reference_drafts(
+    regex_drafts: list[ReferenceDraft],
+    llm_drafts: list[ReferenceDraft],
+) -> list[ReferenceDraft]:
+    merged: dict[str, ReferenceDraft] = {
+        normalized_reference_key(draft.raw_reference_text): draft for draft in regex_drafts
+    }
+    for draft in llm_drafts:
+        key = normalized_reference_key(draft.raw_reference_text)
+        existing = merged.get(key)
+        if existing is None:
+            if draft.confidence_score >= 0.5:
+                draft.verification_status = VerificationStatus.NEEDS_REVIEW
+                merged[key] = draft
+            continue
+        existing.confidence_score = min(0.98, existing.confidence_score + 0.1)
+        existing.extraction_method = ExtractionMethod.LLM
+        _fill_missing_targets(existing, draft)
+    return list(merged.values())
+
+
 def summarize_references(references: list[ReferenceDraft]) -> dict[str, object]:
     by_type: dict[str, int] = {}
     unresolved_target_count = 0

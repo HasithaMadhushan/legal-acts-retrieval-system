@@ -74,11 +74,11 @@ export default function RegisterPage() {
 
   return (
     <AuthLayout
-      kicker="Create access"
-      title="Create an account"
-      description="General Users can search verified Acts. Attorney-at-Law access requires enrollment review."
-      marketingTitle="Join the gazette reading room."
-      marketingBody="Create a General User account to search verified Acts, or request Attorney-at-Law access after enrollment verification. This system does not provide legal advice."
+      kicker="Create account"
+      title="Create your LexAtlas account"
+      description="Choose how you will use LexAtlas. General User access is immediate; Attorney-at-Law access requires verification and administrator approval."
+      marketingTitle="Find the provision. Follow the relationship."
+      marketingBody="Search verified English Acts at section level and trace amendments, repeals, substitutions, insertions and cross-references."
     >
       <form className="flex flex-col gap-5" onSubmit={submit}>
         <FieldGroup>
@@ -162,6 +162,17 @@ export default function RegisterPage() {
         <Button type="submit" size="lg" disabled={pending} className="w-full">
           {submitLabel}
         </Button>
+        <p className="text-sm text-muted-foreground">
+          By creating an account you agree to the{" "}
+          <Link href="/legal/terms" className="underline">
+            Terms of Use
+          </Link>{" "}
+          and{" "}
+          <Link href="/legal/privacy" className="underline">
+            Privacy Policy
+          </Link>
+          .
+        </p>
         <p className="text-sm text-muted-foreground">
           Already have an account?{" "}
           <Button variant="link" render={<Link href="/login" />} nativeButton={false}>

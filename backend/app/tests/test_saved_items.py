@@ -123,7 +123,8 @@ def test_duplicate_saved_item_is_prevented(client, lawyer_token):
     )
 
     assert first.status_code == 201
-    assert second.status_code == 409
+    assert second.status_code == 200
+    assert second.json()["id"] == first.json()["id"]
 
 
 def test_saved_item_target_must_exist(client, lawyer_token):

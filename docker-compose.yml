@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: legal_acts
       POSTGRES_USER: legal_acts
@@ -32,11 +32,30 @@ services:
       # "console" is human-friendly for local dev; use "json" in real deployments
       # so log aggregators (e.g. CloudWatch, Loki) can parse each line.
       LOG_FORMAT: console
+      # PDF extraction — PDF Inspector uses baked, offline OCR assets.
+      PDF_INSPECTOR_ENABLED: ${PDF_INSPECTOR_ENABLED:-true}
+      PDF_INSPECTOR_OCR_MODEL_DIRECTORY: /opt/pdf-inspector/models
+      DOCLING_ENABLED: ${DOCLING_ENABLED:-false}
+      DOCLING_TIMEOUT_SECONDS: ${DOCLING_TIMEOUT_SECONDS:-60}
+      DOC_PARSER_PRIMARY: ${DOC_PARSER_PRIMARY:-pdf_inspector}
+      OCR_ENABLED: ${OCR_ENABLED:-true}
       # Optional: set SENTRY_DSN to enable error tracking. Left unset here since
       # this is a local/dev compose file.
       # SENTRY_DSN: ""
       # Gunicorn worker count (see backend/Dockerfile); 2 is plenty for local dev.
       # WEB_CONCURRENCY: "2"
+      # LLM hybrid extraction stays off until gold-set eval beats regex-only.
+      # Values are read from the project .env file; the API key is never committed.
+      LLM_EXTRACTION_ENABLED: ${LLM_EXTRACTION_ENABLED:-false}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.6-flash}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      # Required only for LLM_PROVIDER=openai-compatible.
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MAX_SECTIONS_PER_ACT: ${LLM_MAX_SECTIONS_PER_ACT:-40}
+      # Semantic search stays off until retrieval eval beats keyword search.
+      # SEMANTIC_SEARCH_ENABLED: "false"
+      # ENABLE_PGVECTOR: "false"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

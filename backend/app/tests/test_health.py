@@ -20,6 +20,21 @@ def test_response_includes_request_id_header(client):
     assert request_id.count("-") == 4
 
 
+def test_health_accepts_pdf_inspector_parser_configuration(client, monkeypatch):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "doc_parser_primary", "pdf_inspector")
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["parser_configuration"] == {
+        "ok": True,
+        "parser_requested": "pdf_inspector",
+    }
+
+
 def test_health_flags_unknown_parser_configuration(client, monkeypatch):
     from app.core.config import get_settings
 

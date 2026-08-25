@@ -4,7 +4,12 @@ from typing import Any
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.core.roles import ProcessingJobStatus, ProcessingStatus, VerificationStatus
+from app.core.roles import (
+    ExtractionMethod,
+    ProcessingJobStatus,
+    ProcessingStatus,
+    VerificationStatus,
+)
 from app.models.act_section import ActSection
 from app.models.evaluation import EvaluationGoldReference, EvaluationRun
 from app.models.legal_act import LegalAct
@@ -51,12 +56,22 @@ def run_reference_evaluation(
     run_name: str,
     act_id: str | None = None,
     section_segmentation_accuracy: float | None = None,
+    extraction_mode: str | None = None,
 ) -> EvaluationRun:
     gold_query = db.query(EvaluationGoldReference)
     prediction_query = db.query(LegalReference)
     if act_id:
         gold_query = gold_query.filter(EvaluationGoldReference.act_id == act_id)
         prediction_query = prediction_query.filter(LegalReference.source_act_id == act_id)
+    mode = (extraction_mode or "hybrid").strip().lower()
+    if mode == "regex-only":
+        prediction_query = prediction_query.filter(
+            LegalReference.extraction_method == ExtractionMethod.REGEX
+        )
+    elif mode == "llm-only":
+        prediction_query = prediction_query.filter(
+            LegalReference.extraction_method == ExtractionMethod.LLM
+        )
 
     gold = gold_query.all()
     predictions = prediction_query.all()
@@ -90,6 +105,7 @@ def run_reference_evaluation(
         section_segmentation_accuracy=section_segmentation_accuracy,
         total_gold_references=len(gold_keys),
         run_summary_json={
+            "extraction_mode": mode,
             "gold_count": len(gold_keys),
             "predicted_count": len(predicted_keys),
             "matched": [_key_to_dict(key) for key in matched_keys[:100]],

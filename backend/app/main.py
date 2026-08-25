@@ -32,6 +32,7 @@ from app.core.rate_limit import limiter
 from app.db.migrate import run_migrations
 from app.db.seed import seed_demo_users
 from app.db.session import SessionLocal, get_db
+from app.services.stale_jobs import fail_stale_running_jobs
 from app.services.storage import get_storage
 
 configure_logging()
@@ -45,6 +46,8 @@ access_logger = get_logger("app.request")
 async def lifespan(app: FastAPI):
     if get_settings().auto_migrate_on_startup:
         run_migrations()
+    with SessionLocal() as db:
+        fail_stale_running_jobs(db, older_than_minutes=30)
     if get_settings().should_seed_demo_data:
         with SessionLocal() as db:
             seed_demo_users(db)
@@ -131,7 +134,7 @@ def _check_upload_directory() -> dict[str, object]:
 
 
 def _check_parser_configuration() -> dict[str, object]:
-    known_parsers = {"", "pymupdf", "docling", "ocr"}
+    known_parsers = {"", "pymupdf", "pdf_inspector", "pdf-inspector", "docling", "ocr"}
     requested = get_settings().doc_parser_primary.strip().lower()
     if requested not in known_parsers:
         return {"ok": False, "error": f"Unknown DOC_PARSER_PRIMARY={requested!r}."}

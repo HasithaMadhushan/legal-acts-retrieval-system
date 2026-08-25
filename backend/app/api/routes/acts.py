@@ -3,7 +3,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import or_
+from sqlalchemy import delete, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_admin
@@ -11,9 +12,12 @@ from app.core.config import get_settings
 from app.core.roles import ProcessingStatus, UserRole, VerificationStatus
 from app.db.session import get_db
 from app.models.act_section import ActSection
+from app.models.evaluation import EvaluationGoldReference, EvaluationRun
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
 from app.models.processing_job import ProcessingJob
+from app.models.reading_history import ReadingHistoryItem
+from app.models.saved_item import SavedItem
 from app.models.user import User
 from app.schemas.legal_act import (
     LegalActBrowseRead,
@@ -31,6 +35,34 @@ router = APIRouter(prefix="/acts", tags=["acts"])
 
 PDF_MIME_TYPES = {"application/pdf", "application/octet-stream", ""}
 PDF_SIGNATURE = b"%PDF-"
+ACT_REFERENCED_DETAIL = "Act is referenced by other Acts and cannot be deleted."
+
+
+def _validate_upload_filename(original_name: str) -> str:
+    if "/" in original_name or "\\" in original_name:
+        raise HTTPException(status_code=400, detail="File name must not contain path separators.")
+    source_name_safe = Path(original_name).name
+    if source_name_safe in {"", ".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid file name.")
+    if not source_name_safe.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+    return source_name_safe
+
+
+def _read_upload_with_digest(file: UploadFile, limit: int) -> tuple[bytes, str]:
+    hasher = hashlib.sha256()
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = file.file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail="PDF exceeds configured upload size limit.")
+        hasher.update(chunk)
+        chunks.append(chunk)
+    return b"".join(chunks), hasher.hexdigest()
 
 
 @router.get("", response_model=list[LegalActRead])
@@ -91,7 +123,12 @@ def browse_acts(
     return [_browse_entry(db, act) for act in acts]
 
 
-@router.post("/upload", response_model=LegalActRead, status_code=201)
+@router.post(
+    "/upload",
+    response_model=LegalActRead,
+    status_code=201,
+    responses={409: {"description": "Duplicate PDF already uploaded"}},
+)
 def upload_act(
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
@@ -104,32 +141,18 @@ def upload_act(
     current_user: User = Depends(require_admin),
 ) -> LegalAct:
     settings = get_settings()
-    original_name = file.filename or "uploaded.pdf"
-    if "/" in original_name or "\\" in original_name:
-        raise HTTPException(status_code=400, detail="File name must not contain path separators.")
-
-    source_name_safe = Path(original_name).name
-    if source_name_safe in {"", ".", ".."}:
-        raise HTTPException(status_code=400, detail="Invalid file name.")
-    if not source_name_safe.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
-
+    source_name_safe = _validate_upload_filename(file.filename or "uploaded.pdf")
     mime_type = file.content_type or ""
     if mime_type not in PDF_MIME_TYPES:
         raise HTTPException(status_code=400, detail="Only PDF MIME types are allowed.")
 
-    content = file.file.read()
+    content, digest = _read_upload_with_digest(file, settings.max_upload_size_bytes)
     if not content.startswith(PDF_SIGNATURE):
         raise HTTPException(status_code=400, detail="Uploaded file content is not a valid PDF.")
-    if len(content) > settings.max_upload_size_bytes:
-        raise HTTPException(status_code=413, detail="PDF exceeds configured upload size limit.")
-    digest = hashlib.sha256(content).hexdigest()
     if db.query(LegalAct).filter(LegalAct.file_sha256 == digest).first():
         raise HTTPException(status_code=409, detail="This PDF has already been uploaded.")
 
-    stored_name = f"{uuid4()}.pdf"
-    stored_key = get_storage().save(stored_name, content)
-
+    stored_key = get_storage().save(f"{uuid4()}.pdf", content)
     title_value = (title or "").strip() or source_name_safe.rsplit(".", 1)[0].replace("_", " ")
     act = LegalAct(
         title=title_value,
@@ -189,7 +212,10 @@ def update_act(
     return act
 
 
-@router.delete("/{act_id}")
+@router.delete(
+    "/{act_id}",
+    responses={409: {"description": ACT_REFERENCED_DETAIL}},
+)
 def delete_act(
     act_id: str,
     db: Session = Depends(get_db),
@@ -198,8 +224,62 @@ def delete_act(
     act = db.get(LegalAct, act_id)
     if not act:
         raise HTTPException(status_code=404, detail="Act not found.")
-    db.delete(act)
-    db.commit()
+    section_ids = [
+        row[0] for row in db.query(ActSection.id).filter(ActSection.act_id == act_id)
+    ]
+    incoming_filter = LegalReference.target_act_id == act_id
+    if section_ids:
+        incoming_filter = or_(
+            incoming_filter,
+            LegalReference.target_section_id.in_(section_ids),
+        )
+    incoming = (
+        db.query(LegalReference)
+        .filter(
+            incoming_filter,
+            LegalReference.source_act_id != act_id,
+        )
+        .first()
+    )
+    if incoming:
+        raise HTTPException(status_code=409, detail=ACT_REFERENCED_DETAIL)
+    stored_key = act.stored_file_path
+    try:
+        reference_ids = [
+            row[0]
+            for row in db.query(LegalReference.id).filter(
+                LegalReference.source_act_id == act_id
+            )
+        ]
+        saved_item_filter = SavedItem.act_id == act_id
+        if section_ids:
+            saved_item_filter = or_(
+                saved_item_filter,
+                SavedItem.section_id.in_(section_ids),
+            )
+        if reference_ids:
+            saved_item_filter = or_(
+                saved_item_filter,
+                SavedItem.reference_id.in_(reference_ids),
+            )
+        db.execute(delete(SavedItem).where(saved_item_filter))
+        db.execute(delete(ReadingHistoryItem).where(ReadingHistoryItem.act_id == act_id))
+        db.execute(
+            delete(EvaluationGoldReference).where(EvaluationGoldReference.act_id == act_id)
+        )
+        db.execute(delete(EvaluationRun).where(EvaluationRun.act_id == act_id))
+        db.execute(delete(ProcessingJob).where(ProcessingJob.act_id == act_id))
+        db.execute(delete(LegalReference).where(LegalReference.source_act_id == act_id))
+        db.execute(delete(ActSection).where(ActSection.act_id == act_id))
+        db.delete(act)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=ACT_REFERENCED_DETAIL) from None
+    try:
+        get_storage().delete(stored_key)
+    except Exception:
+        pass
     return {"detail": "Act deleted."}
 
 

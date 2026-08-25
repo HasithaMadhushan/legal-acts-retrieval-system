@@ -1,28 +1,38 @@
-from datetime import datetime
 
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.core.roles import ParserName, ProcessingJobStatus, ProcessingStatus, VerificationStatus
+from app.core.roles import (
+    ExtractionMethod,
+    ParserName,
+    ProcessingJobStatus,
+    ProcessingStatus,
+    VerificationStatus,
+)
 from app.db.session import SessionLocal
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
+from app.models.mixins import utc_now
 from app.models.processing_job import ProcessingJob
 from app.models.user import User
+from app.services.embedding_service import embed_text
 from app.services.metadata_extractor import ExtractedMetadata, extract_metadata
 from app.services.pdf_parser.base import PdfExtractionError, PdfParser
 from app.services.pdf_parser.docling_parser import DoclingParser
+from app.services.pdf_parser.pdf_inspector_parser import PdfInspectorParser
 from app.services.pdf_parser.pymupdf_parser import PyMuPdfParser
+from app.services.pdf_parser.quality_gated_parser import QualityGatedPdfParser
 from app.services.reference_extractor import (
     ReferenceDraft,
-    extract_references,
+    extract_references_hybrid,
     summarize_references,
 )
 from app.services.reference_mapper import map_references, summarize_mapping
 from app.services.section_segmenter import segment_act_text
+from app.services.stale_jobs import fail_stale_running_jobs as fail_stale_running_jobs
 from app.services.storage import get_storage
 from app.services.text_cleaner import clean_text, normalize_for_search
 
@@ -87,7 +97,7 @@ def run_processing_job(job_id: str) -> None:
         if act is None:
             job.status = ProcessingJobStatus.FAILED
             job.error_message = "The Act associated with this job no longer exists."
-            job.completed_at = datetime.utcnow()
+            job.completed_at = utc_now()
             db.commit()
             return
         _execute_processing_job(db, job, act)
@@ -110,7 +120,7 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
     job.status = ProcessingJobStatus.RUNNING
     job.current_step = "Starting processing"
     job.progress_percent = 5
-    job.started_at = datetime.utcnow()
+    job.started_at = utc_now()
     job.summary_json = summary
     db.commit()
     db.refresh(job)
@@ -250,6 +260,7 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
             )
             db.add(section)
             sections.append(section)
+            section.embedding = embed_text(section.text)
         db.flush()
 
         job.current_step = "Extracting and mapping references"
@@ -257,7 +268,7 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         reference_drafts: list[ReferenceDraft] = []
         references: list[LegalReference] = []
         for section in sections:
-            for draft in extract_references(section.text):
+            for draft in extract_references_hybrid(section.text):
                 reference_drafts.append(draft)
                 reference = LegalReference(
                     source_act_id=act.id,
@@ -278,7 +289,15 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
 
         mapping_results = map_references(db, act, references)
         for result in mapping_results:
-            db.add(result.reference)
+            reference = result.reference
+            if (
+                reference.extraction_method == ExtractionMethod.LLM
+                and reference.target_act_id is None
+                and reference.target_section_id is None
+            ):
+                reference.confidence_score = min(reference.confidence_score, 0.5)
+                reference.verification_status = VerificationStatus.NEEDS_REVIEW
+            db.add(reference)
 
         reference_summary = summarize_references(reference_drafts)
         if preserved_reference_count:
@@ -301,7 +320,7 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         job.status = ProcessingJobStatus.COMPLETED
         job.current_step = "Completed"
         job.progress_percent = 100
-        job.completed_at = datetime.utcnow()
+        job.completed_at = utc_now()
         summary.update(
             {
                 "sections_created": len(sections),
@@ -356,7 +375,7 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         failed_job.status = ProcessingJobStatus.FAILED
         failed_job.current_step = "Failed"
         failed_job.progress_percent = 100
-        failed_job.completed_at = datetime.utcnow()
+        failed_job.completed_at = utc_now()
         failed_job.error_message = error_message
         failed_job.summary_json = summary
         db.commit()
@@ -373,6 +392,30 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
 def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:
     requested = settings.doc_parser_primary.strip().lower()
     warnings: list[str] = []
+
+    if requested in {"pdf-inspector", "pdf_inspector"}:
+        if settings.pdf_inspector_enabled:
+            docling_fallback = None
+            if settings.docling_enabled:
+                docling_fallback = DoclingParser(
+                    timeout_seconds=settings.docling_timeout_seconds
+                )
+            return (
+                QualityGatedPdfParser(
+                    PdfInspectorParser(
+                        ocr_enabled=settings.ocr_enabled,
+                        ocr_model_directory=settings.pdf_inspector_ocr_model_directory,
+                    ),
+                    docling_fallback,
+                    PyMuPdfParser(),
+                ),
+                requested,
+                warnings,
+            )
+        warnings.append(
+            "PDF Inspector was requested, but PDF_INSPECTOR_ENABLED=false; PyMuPDF was used."
+        )
+        return PyMuPdfParser(), requested, warnings
 
     if requested == "docling":
         if settings.docling_enabled:

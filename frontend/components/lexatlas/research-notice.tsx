@@ -1,6 +1,12 @@
 import { cn } from "@/lib/utils";
 
-export function ResearchNotice({ className }: { className?: string }) {
+export function ResearchNotice({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <p
       className={cn(
@@ -8,7 +14,7 @@ export function ResearchNotice({ className }: { className?: string }) {
         className
       )}
     >
-      Research support only. Verify against the official legislation. Not legal advice or consolidated law.
+      {children ?? "Research support only. Verify against the official legislation. Not legal advice or consolidated law."}
     </p>
   );
 }

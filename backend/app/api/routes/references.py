@@ -1,4 +1,3 @@
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
@@ -10,6 +9,7 @@ from app.db.session import get_db
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
+from app.models.mixins import utc_now
 from app.models.user import User
 from app.schemas.reference import LinkTargetRequest, ReferenceCreate, ReferenceRead, ReferenceUpdate
 
@@ -138,7 +138,7 @@ def verify_reference(
         raise HTTPException(status_code=404, detail="Reference not found.")
     reference.verification_status = VerificationStatus.VERIFIED
     reference.verified_by_user_id = current_user.id
-    reference.verified_at = datetime.utcnow()
+    reference.verified_at = utc_now()
     db.commit()
     db.refresh(reference)
     return reference
@@ -155,7 +155,7 @@ def reject_reference(
         raise HTTPException(status_code=404, detail="Reference not found.")
     reference.verification_status = VerificationStatus.REJECTED
     reference.verified_by_user_id = current_user.id
-    reference.verified_at = datetime.utcnow()
+    reference.verified_at = utc_now()
     db.commit()
     db.refresh(reference)
     return reference
@@ -178,7 +178,7 @@ def link_reference_target(
     if payload.target_act_id or payload.target_section_id:
         reference.verification_status = VerificationStatus.VERIFIED
         reference.verified_by_user_id = current_user.id
-        reference.verified_at = datetime.utcnow()
+        reference.verified_at = utc_now()
     else:
         reference.verification_status = VerificationStatus.NEEDS_REVIEW
         reference.verified_by_user_id = None
@@ -226,7 +226,7 @@ def _set_verification_metadata(reference: LegalReference, current_user: User) ->
         VerificationStatus.REJECTED,
     }:
         reference.verified_by_user_id = current_user.id
-        reference.verified_at = datetime.utcnow()
+        reference.verified_at = utc_now()
     else:
         reference.verified_by_user_id = None
         reference.verified_at = None

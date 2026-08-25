@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { approveLawyerRequest, exportUrl, listUsers, rejectLawyerRequest } from "@/lib/api";
+import {
+  approveLawyerRequest,
+  deactivateUser,
+  exportUrl,
+  listUsers,
+  rejectLawyerRequest,
+  updateUser
+} from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import type { User } from "@/lib/types";
 import { RoleGuard } from "@/components/role-guard";
@@ -9,6 +16,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -52,6 +67,32 @@ export default function AdminUsersPage() {
     }
   }
 
+  async function changeRole(userId: string, role: User["role"]) {
+    setError("");
+    setPendingId(userId);
+    try {
+      await updateUser(userId, { role });
+      loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update the user role.");
+    } finally {
+      setPendingId("");
+    }
+  }
+
+  async function deactivate(userId: string) {
+    setError("");
+    setPendingId(userId);
+    try {
+      await deactivateUser(userId);
+      loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to deactivate the user.");
+    } finally {
+      setPendingId("");
+    }
+  }
+
   async function downloadProof(userId: string) {
     setError("");
     const token = getToken();
@@ -83,15 +124,22 @@ export default function AdminUsersPage() {
 
   return (
     <RoleGuard allowed={["ADMIN"]} path="/admin/users">
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-5">
+        <div>
+          <h1 className="font-serif text-[30px] font-semibold tracking-[-0.45px] text-[#0b1626]">Users</h1>
+          <p className="mt-2 text-[14.5px] text-muted-foreground">
+            Manage accounts, roles and attorney verification requests.
+          </p>
+        </div>
         {error ? (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
-        <Card>
+        <p className="text-[11px] font-semibold tracking-[0.12em] text-[#92681f] uppercase">Attorney verification requests · {pendingLawyers.length}</p>
+        <Card className="rounded-lg">
           <CardHeader>
-            <CardTitle>Pending attorney requests</CardTitle>
+            <CardTitle className="font-serif">Pending attorney requests</CardTitle>
             <CardDescription>
               Review enrollment proof, then approve to grant LAWYER access. Until then the account
               stays General User.
@@ -145,7 +193,8 @@ export default function AdminUsersPage() {
             )}
           </CardContent>
         </Card>
-        <Card>
+        <p className="text-[11px] font-semibold tracking-[0.12em] text-[#92681f] uppercase">All users · {users.length}</p>
+        <Card className="rounded-lg">
           <CardHeader>
             <CardTitle>Users and roles</CardTitle>
             <CardDescription>All registered accounts in the academic prototype.</CardDescription>
@@ -159,6 +208,7 @@ export default function AdminUsersPage() {
                   <TableHead>Role</TableHead>
                   <TableHead>Attorney request</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -178,6 +228,34 @@ export default function AdminUsersPage() {
                       <Badge variant={user.is_active ? "secondary" : "destructive"}>
                         {user.is_active ? "ACTIVE" : "INACTIVE"}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex min-w-52 items-center gap-2">
+                        <Select
+                          value={user.role}
+                          disabled={!user.is_active || user.role === "ADMIN" || pendingId === user.id}
+                          onValueChange={(value) => void changeRole(user.id, value as User["role"])}
+                        >
+                          <SelectTrigger className="h-8 w-36" aria-label={`Role for ${user.email}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="GENERAL_USER">General user</SelectItem>
+                            <SelectItem value="LAWYER">Lawyer</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {user.role !== "ADMIN" && user.is_active ? (
+                          <ConfirmDialog
+                            title="Deactivate this account?"
+                            description={`${user.email} will no longer be able to sign in.`}
+                            triggerLabel="Deactivate"
+                            confirmLabel="Deactivate"
+                            pendingLabel="Deactivating..."
+                            pending={pendingId === user.id}
+                            onConfirm={() => deactivate(user.id)}
+                          />
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
