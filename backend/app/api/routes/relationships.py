@@ -104,9 +104,15 @@ def relationship_graph(
         verification_status=verification_status,
         mapped_status=mapped_status,
     )
+    references = [
+        reference
+        for reference in references
+        if reference.target_act_id is None
+        or reference.source_act_id != reference.target_act_id
+    ]
     nodes: dict[str, RelationshipGraphNode] = {}
     edges: list[RelationshipGraphEdge] = []
-    for reference in references[:100]:
+    for reference in references:
         source_act = reference.source_act
         target_act = reference.target_act
         if not source_act or not target_act:
@@ -126,6 +132,8 @@ def relationship_graph(
                 status=reference.verification_status.value,
             )
         )
+        if len(edges) >= 100:
+            break
     return RelationshipGraphResponse(
         depth=depth,
         nodes=list(nodes.values()),

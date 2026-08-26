@@ -118,6 +118,29 @@ Required particulars.
     assert all(len(section.section_number) <= 50 for section in result.sections)
 
 
+def test_part_reference_sentence_does_not_become_part_identifier():
+    text = """PART III
+GENERAL PROVISIONS
+
+1. Application.
+Part IV of this Act, dealing with off-shore banking, shall apply.
+
+2. Interpretation.
+Terms used in this Act have their ordinary meaning.
+"""
+
+    result = segment_act_text(text)
+
+    assert [
+        section.section_number
+        for section in result.sections
+        if section.section_type == SectionType.PART
+    ] == ["PART III"]
+    assert "Part IV of this Act" in next(
+        section.text for section in result.sections if section.section_number == "1"
+    )
+
+
 def test_cover_and_publication_text_is_not_treated_as_section_body():
     text = """PARLIAMENT OF THE DEMOCRATIC SOCIALIST REPUBLIC OF SRI LANKA
 POISONS, OPIUM AND DANGEROUS DRUGS (AMENDMENT) ACT
