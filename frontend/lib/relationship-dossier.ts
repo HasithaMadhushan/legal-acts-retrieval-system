@@ -133,20 +133,21 @@ export function dossierKeyForAct(
 
 function familyForRow(row: RelationshipRow, focusId: string): DossierFamily {
   if (row.direction === "incoming") return "incoming";
-  if (!row.mapped || !row.target_act_id) return "unresolved";
   if (row.target_act_id === focusId || row.target_act_id === row.source_act_id) return "internal";
+  if (isBareInternalCitation(row)) return "internal";
+  if (!row.mapped || !row.target_act_id) return "unresolved";
   return familyFromType(row.relationship_type);
-}
-
-function familyFromType(type: string): DossierFamily {
-  if (type === "AMENDS" || type === "REPEALS" || type === "SUBSTITUTES") return "amends";
-  if (type === "INSERTS" || type === "ADDS") return "inserts";
-  return "refers";
 }
 
 function counterpartFor(row: RelationshipRow, family: DossierFamily): { id: string | null; label: string } {
   if (family === "incoming") {
     return { id: row.source_act_id, label: row.source_act_title ?? row.source_act_id };
+  }
+  if (family === "internal") {
+    return {
+      id: row.target_act_id ?? row.source_act_id,
+      label: row.target_act_title ?? row.source_act_title ?? "This Act"
+    };
   }
   if (family === "unresolved") {
     return { id: null, label: unresolvedTargetLabel(row) };
@@ -155,6 +156,33 @@ function counterpartFor(row: RelationshipRow, family: DossierFamily): { id: stri
     id: row.target_act_id,
     label: row.target_act_title ?? row.target_act_title_raw ?? row.target_act_id ?? "Mapped Act"
   };
+}
+
+function familyFromType(type: string): DossierFamily {
+  if (type === "AMENDS" || type === "REPEALS" || type === "SUBSTITUTES") return "amends";
+  if (type === "INSERTS" || type === "ADDS") return "inserts";
+  return "refers";
+}
+
+const INTERNAL_CITE =
+  /\b((first|second|third|fourth|fifth)\s+)?(section|subsection|paragraph|schedule|item|proviso|part)\b/i;
+
+function isBareInternalCitation(
+  row: Pick<
+    RelationshipRow,
+    | "target_act_id"
+    | "target_act_number"
+    | "target_act_year"
+    | "target_act_title_raw"
+    | "raw_reference_text"
+  >
+) {
+  if (row.target_act_id || row.target_act_number || row.target_act_year) return false;
+  const title = row.target_act_title_raw ?? "";
+  const raw = row.raw_reference_text ?? "";
+  if (extractCitedActName(title) || extractCitedActName(raw)) return false;
+  if (/Chapter\s+\d+/i.test(title) || /Chapter\s+\d+/i.test(raw)) return false;
+  return INTERNAL_CITE.test(raw) || /principal enactment|\bthereof\b|\bthis Act\b/i.test(raw);
 }
 
 export function unresolvedTargetLabel(
