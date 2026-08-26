@@ -112,6 +112,49 @@ describe("buildRelationshipDossier", () => {
     expect(sections[1]?.groups[0]?.counterpartLabel).toBe("Missing Act");
   });
 
+  it("groups unmapped section and schedule cites under Within this Act", () => {
+    const sections = buildRelationshipDossier(
+      [
+        row({
+          id: "s21",
+          mapped: false,
+          target_act_id: null,
+          target_act_title: null,
+          target_act_title_raw: null,
+          target_act_number: null,
+          target_act_year: null,
+          raw_reference_text: "section 21"
+        }),
+        row({
+          id: "sch",
+          mapped: false,
+          target_act_id: null,
+          target_act_title: null,
+          target_act_title_raw: null,
+          target_act_number: null,
+          target_act_year: null,
+          raw_reference_text: "First Schedule"
+        }),
+        row({
+          id: "sub",
+          mapped: false,
+          target_act_id: null,
+          target_act_title: null,
+          target_act_title_raw: null,
+          target_act_number: null,
+          target_act_year: null,
+          raw_reference_text: "subsection (1)"
+        })
+      ],
+      "vat"
+    );
+
+    expect(sections.map((section) => section.family)).toEqual(["internal"]);
+    expect(sections[0]?.groups[0]?.counterpartId).toBe("vat");
+    expect(sections[0]?.groups[0]?.counterpartLabel).toBe("Value Added Tax Act");
+    expect(sections[0]?.groups[0]?.count).toBe(3);
+  });
+
   it("groups unresolved snippet citations under the cited Act name", () => {
     const sections = buildRelationshipDossier(
       [
