@@ -11,7 +11,10 @@ SCHEDULE_RE = re.compile(
     r"SCHEDULE(?:\s+(?:[IVXLCDM]+|\d+))?"
     r")\s*$"
 )
-PART_RE = re.compile(r"(?im)^\s*PART\s+[IVXLCDM]+\b.*$")
+PART_RE = re.compile(
+    r"(?m)^\s*(?P<number>(?:PART|Part)\s+[IVXLCDM]+)"
+    r"(?:\s+(?P<heading>[A-Z][A-Z0-9\s&,'()/-]*))?\s*$"
+)
 COVER_LINE_RE = re.compile(
     r"("
     r"parliament of the democratic socialist republic|government printing|department of "
@@ -137,12 +140,13 @@ def _find_boundaries(text: str) -> list[_Boundary]:
         if first_schedule_start is not None and match.start() >= first_schedule_start:
             continue
         line = match.group(0).strip()
+        number = match.group("number").upper()
         boundaries.append(
             _Boundary(
                 start=match.start(),
                 marker_start=match.start(),
                 kind=SectionType.PART,
-                number=line,
+                number=number,
                 heading=line,
             )
         )

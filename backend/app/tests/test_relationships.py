@@ -285,6 +285,22 @@ def test_unresolved_target_details_do_not_create_fake_ids(client, admin_token):
 
 def test_relationship_graph_uses_mapped_act_edges_only(client, admin_token):
     ids = _create_relationship_fixture()
+    with SessionLocal() as db:
+        self_map = LegalReference(
+            source_act_id=ids["source_act_id"],
+            source_section_id=ids["source_section_id"],
+            raw_reference_text="Section 1 of this Act",
+            context_snippet="Section 1 of this Act applies.",
+            relationship_type=RelationshipType.CROSS_REFERENCE,
+            target_act_id=ids["source_act_id"],
+            target_section_id=ids["source_section_id"],
+            target_section_number="1",
+            confidence_score=0.95,
+            verification_status=VerificationStatus.VERIFIED,
+        )
+        db.add(self_map)
+        db.commit()
+        self_map_id = self_map.id
 
     response = client.get(
         "/api/v1/relationships/graph",
@@ -295,4 +311,42 @@ def test_relationship_graph_uses_mapped_act_edges_only(client, admin_token):
     assert response.status_code == 200
     data = response.json()
     assert {edge["id"] for edge in data["edges"]} == {ids["outgoing_id"], ids["incoming_id"]}
+    assert self_map_id not in {edge["id"] for edge in data["edges"]}
+    assert all(edge["source"] != edge["target"] for edge in data["edges"])
+    assert data["summary"]["mapped_count"] == 2
     assert data["summary"]["unresolved_count"] == 3
+
+
+def test_relationship_graph_edges_are_not_starved_by_newer_unresolved_rows(
+    client, admin_token
+):
+    ids = _create_relationship_fixture()
+    with SessionLocal() as db:
+        db.add_all(
+            [
+                LegalReference(
+                    source_act_id=ids["source_act_id"],
+                    source_section_id=ids["source_section_id"],
+                    raw_reference_text=f"Unresolved relationship {index}",
+                    context_snippet=f"Unresolved relationship context {index}.",
+                    relationship_type=RelationshipType.REFERS_TO,
+                    target_act_title_raw=f"Missing Act {index}",
+                    confidence_score=0.5,
+                    verification_status=VerificationStatus.NEEDS_REVIEW,
+                )
+                for index in range(101)
+            ]
+        )
+        db.commit()
+
+    response = client.get(
+        "/api/v1/relationships/graph",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        params={"act_id": ids["source_act_id"]},
+    )
+
+    assert response.status_code == 200
+    assert {edge["id"] for edge in response.json()["edges"]} == {
+        ids["outgoing_id"],
+        ids["incoming_id"],
+    }

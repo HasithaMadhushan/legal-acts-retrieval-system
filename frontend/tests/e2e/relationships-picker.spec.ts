@@ -18,12 +18,15 @@ test("lawyer can choose a relationship focus Act without knowing its UUID", asyn
   const focusPicker = page.getByRole("combobox").first();
   await expect(focusPicker).toBeVisible();
   await focusPicker.click();
-  const options = page.getByRole("option");
-  await expect(options.first()).toBeVisible();
-  await options.first().click();
+  const antiCorruptionAct = page.getByRole("option", {
+    name: /Anti-Corruption Act.*No\. 9.*2023/i
+  });
+  await expect(antiCorruptionAct).toBeVisible();
+  await antiCorruptionAct.click();
   await page.getByRole("button", { name: "Render" }).click();
   await expect(
-    page.getByText(/No external Act-to-Act network to draw yet|No verified relationships are available yet/)
+    page.getByRole("img", { name: "Mapped Act-to-Act relationship graph" })
   ).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText(/\d+ nodes? · [1-9]\d* edges?/i)).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("relationship-explorer.png"), fullPage: true });
 });
