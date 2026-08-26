@@ -275,16 +275,7 @@ export default function LawyerRelationshipsPage() {
   const focusActRecord =
     focusAct ??
     (focusId ? acts.find((act) => act.id === focusId) ?? null : null);
-  const focusLabel = !focusId
-    ? ""
-    : focusActRecord
-      ? displayActTitle(focusActRecord)
-      : displayActTitle({
-          title: graph?.nodes.find((node) => node.id === focusId)?.label,
-          act_number: null,
-          year: null,
-          source_file_name: null
-        });
+  const focusLabel = resolveFocusLabel(focusId, focusActRecord, graph);
   const focusSelectLabel = focusId ? focusLabel || "Selected Act" : "";
   const focusSelectTitle = focusActRecord
     ? displayActTitleWithMeta(focusActRecord)
@@ -656,6 +647,21 @@ function RelationshipTable({
 
 function formatActOption(act: LegalAct) {
   return displayActTitleWithMeta(act);
+}
+
+function resolveFocusLabel(
+  focusId: string,
+  focusActRecord: LegalAct | null,
+  graph: RelationshipGraphResponse | null
+) {
+  if (!focusId) return "";
+  if (focusActRecord) return displayActTitle(focusActRecord);
+  return displayActTitle({
+    title: graph?.nodes.find((node) => node.id === focusId)?.label,
+    act_number: null,
+    year: null,
+    source_file_name: null
+  });
 }
 
 function relationshipTypeLabel(value: string) {

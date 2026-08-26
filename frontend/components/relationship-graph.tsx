@@ -247,9 +247,7 @@ export function RelationshipGraph({
             );
             const neighbors = neighborCount(node.id, aggregatedEdges);
             const citations = incidentCitationCount(node.id, aggregatedEdges);
-            const detail = isFocus
-              ? `${neighbors} linked Act${neighbors === 1 ? "" : "s"}`
-              : `${citations} citation${citations === 1 ? "" : "s"}`;
+            const detail = isFocus ? countLabel(neighbors, "linked Act") : countLabel(citations, "citation");
             return (
               <GraphNodeCard
                 key={node.id}
@@ -277,11 +275,11 @@ export function RelationshipGraph({
         <LegendSwatch color="#1e3a5f" label="Refers to" />
         <span className="inline-flex items-center gap-1.5">
           <span className="h-1 w-5 rounded-sm bg-[#1e3a5f]" aria-hidden />
-          More citations
+          <span>More citations</span>
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-0.5 w-3.5 border-t-2 border-dashed border-[#92681f]" aria-hidden />
-          Pending
+          <span>Pending</span>
         </span>
       </div>
 
@@ -356,7 +354,6 @@ function GraphEdgeLink({
               : edgeBadgeClass(edge.label),
             selected ? "ring-2 ring-[#b8955a]/50" : ""
           )}
-          onClick={selectEdge}
         >
           {caption}
         </div>
@@ -422,11 +419,7 @@ function GraphNodeCard({
         aria-grabbed={dragging}
         className={cn(
           "flex w-full cursor-grab flex-col items-start rounded-lg border bg-card px-3.5 py-2.5 text-left shadow-sm select-none touch-none",
-          isFocus
-            ? "border-[#b8955a] bg-[#fffbf2] shadow-[0_8px_24px_rgba(15,32,51,0.07)]"
-            : pending
-              ? "border-dashed border-[#1e3a5f]/55 opacity-70"
-              : "border-[#1e3a5f]",
+          nodeCardTone(isFocus, pending),
           isSelected && !isFocus ? "ring-2 ring-[#b8955a]/40" : "",
           dragging ? "cursor-grabbing shadow-lg" : ""
         )}
@@ -476,8 +469,8 @@ function GraphChrome({
         <span className="shrink-0 text-[#14263c]">Focus:</span>
         <strong className="truncate font-semibold text-[#14263c]">{shortLabel(displayFocusLabel, 34)}</strong>
         <span className="shrink-0 whitespace-nowrap text-[#14263c]">
-          · {depth} hop{depth === 1 ? "" : "s"} · {linkedCount} linked Act{linkedCount === 1 ? "" : "s"}
-          {citationCount ? ` · ${citationCount} citation${citationCount === 1 ? "" : "s"}` : ""}
+          · {countLabel(depth, "hop")} · {countLabel(linkedCount, "linked Act")}
+          {citationCount ? ` · ${countLabel(citationCount, "citation")}` : ""}
         </span>
       </div>
       <p className="pl-[15px] text-[11px] text-muted-foreground">
@@ -669,6 +662,16 @@ function edgeBadgeClass(label: string) {
     return "border-[#cfe0d4] bg-[#ebf3ee] text-[#22684a]";
   }
   return "border-[#c8d5e2] bg-[#fffefb] text-[#1e3a5f]";
+}
+
+function nodeCardTone(isFocus: boolean, pending: boolean) {
+  if (isFocus) return "border-[#b8955a] bg-[#fffbf2] shadow-[0_8px_24px_rgba(15,32,51,0.07)]";
+  if (pending) return "border-dashed border-[#1e3a5f]/55 opacity-70";
+  return "border-[#1e3a5f]";
+}
+
+function countLabel(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function shortLabel(label: string, max = 28) {

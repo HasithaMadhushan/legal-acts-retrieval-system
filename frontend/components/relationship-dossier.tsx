@@ -261,9 +261,7 @@ function CitationLine({ citation }: Readonly<{ citation: DossierCitation }>) {
   const sectionHref = citation.sectionId
     ? `/sections/${citation.sectionId}`
     : null;
-  const heading = citation.sectionNumber
-    ? `s.${citation.sectionNumber}${citation.sectionHeading ? ` · ${citation.sectionHeading}` : ""}`
-    : citation.rawText;
+  const heading = citationHeading(citation);
   return (
     <div className="rounded-md border border-[#ede8db] bg-card px-3 py-2">
       <div className="flex items-center gap-2">
@@ -302,6 +300,12 @@ function focusMeta(act: LegalAct | null) {
     act.page_count ? `${act.page_count} pages` : null
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : "Mapped citing references for this Act";
+}
+
+function citationHeading(citation: DossierCitation) {
+  if (!citation.sectionNumber) return citation.rawText;
+  if (!citation.sectionHeading) return `s.${citation.sectionNumber}`;
+  return `s.${citation.sectionNumber} · ${citation.sectionHeading}`;
 }
 
 function formatType(type: string) {

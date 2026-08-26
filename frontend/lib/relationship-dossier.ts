@@ -69,7 +69,9 @@ export function buildRelationshipDossier(
     const first = members[0];
     if (!first) continue;
     const family = key.slice(0, key.indexOf("|")) as DossierFamily;
-    const types = [...new Set(members.map((member) => member.relationship_type))].sort();
+    const types = [...new Set(members.map((member) => member.relationship_type))].sort((left, right) =>
+      left.localeCompare(right)
+    );
     const counterpart = counterpartFor(first, family);
     const group: DossierActGroup = {
       key,
@@ -166,7 +168,7 @@ export function unresolvedTargetLabel(
   const fromText = extractCitedActName(row.raw_reference_text ?? "");
   if (fromText) return fromText;
   const source = [row.target_act_title_raw, row.raw_reference_text].filter(Boolean).join(" ");
-  const chapter = source.match(/\bChapter\s+(\d+[A-Z]?)\b/i);
+  const chapter = /Chapter\s+(\d+[A-Z]?)/i.exec(source);
   if (chapter?.[1]) return `Chapter ${chapter[1]}`;
   if (row.target_act_number && row.target_act_year) {
     return `Act No. ${row.target_act_number} of ${row.target_act_year}`;
@@ -175,14 +177,16 @@ export function unresolvedTargetLabel(
 }
 
 const CITED_ACT_NAME =
-  /\b([A-Z][A-Za-z0-9'’]*(?:\s+(?:and|of|the|for|&|[A-Z][A-Za-z0-9'’-]*)){0,5})\s+(Act|Ordinance|Code)\b/g;
+  /\b([A-Z][A-Za-z0-9'’]*(?:\s+(?:and|of|the|for|&|[A-Z][A-Za-z0-9'’-]*)){0,5})\s+(Act|Ordinance)\b/g;
+
+const WEAK_ACT_TITLES = new Set(["fund act", "trust act", "the code", "code"]);
 
 function extractCitedActName(text: string): string | null {
-  const padded = text.replace(/([a-z])(Act|Ordinance|Code)\b/g, "$1 $2");
+  const padded = text.replace(/([a-z])(Act|Ordinance)\b/g, "$1 $2");
   let best: string | null = null;
   for (const match of padded.matchAll(CITED_ACT_NAME)) {
     const name = tidyActName(`${match[1] ?? ""} ${match[2] ?? ""}`);
-    if (name.length < 5) continue;
+    if (name.length < 5 || WEAK_ACT_TITLES.has(name.toLowerCase())) continue;
     if (!best || name.length > best.length) best = name;
   }
   return best;

@@ -192,6 +192,33 @@ describe("unresolvedTargetLabel", () => {
       )
     ).toBe("Unmatched target");
   });
+
+  it("ignores overly short generic titles in favour of the real Act name", () => {
+    expect(
+      unresolvedTargetLabel(
+        row({
+          id: "fund",
+          mapped: false,
+          target_act_id: null,
+          target_act_title_raw: "Api Wenuwen Api Fund Act",
+          raw_reference_text: "Fund Act"
+        })
+      )
+    ).toBe("Api Wenuwen Api Fund Act");
+    expect(
+      unresolvedTargetLabel(
+        row({
+          id: "code",
+          mapped: false,
+          target_act_id: null,
+          target_act_title_raw: "Constitution and the Code",
+          raw_reference_text: "the Code",
+          target_act_number: null,
+          target_act_year: null
+        })
+      )
+    ).toBe("Unmatched target");
+  });
 });
 
 describe("dossierNeighborCount", () => {
