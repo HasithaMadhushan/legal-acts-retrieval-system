@@ -1,18 +1,29 @@
 "use client";
 
 import { Maximize2, Minus, Plus } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { displayActTitle } from "@/lib/act-display";
+import {
+  aggregateGraphEdges,
+  displayEdgeLabel,
+  edgeStrokeWidth,
+  neighborCount,
+  totalCitationCount,
+  withPairOffsets,
+  type AggregatedGraphEdge,
+  type GraphEdgeInput,
+  type GraphEdgeSelection
+} from "@/lib/graph-edges";
+import {
+  clientPointToGraph,
+  dragNodePosition,
+  GRAPH_VIEW,
+  resolvedNodePosition,
+  type GraphPoint
+} from "@/lib/graph-layout";
+import { incidentCitationCount } from "@/lib/linked-acts";
 import { cn } from "@/lib/utils";
-
-interface Edge {
-  id: string;
-  source: string;
-  target: string;
-  label: string;
-  status: string;
-}
 
 interface Node {
   id: string;
@@ -22,16 +33,18 @@ interface Node {
 
 type RelationshipGraphProps = Readonly<{
   nodes: Node[];
-  edges: Edge[];
+  edges: GraphEdgeInput[];
   focusId?: string | null;
   focusLabel?: string;
   depth?: number;
   unresolvedCount?: number;
   selectedNodeId?: string | null;
+  selectedEdgeKey?: string | null;
   hasRendered?: boolean;
   statusFilter?: string;
   totalResults?: number;
   onSelectNode?: (nodeId: string) => void;
+  onSelectEdge?: (edge: GraphEdgeSelection) => void;
   onRefocusNode?: (nodeId: string) => void;
 }>;
 
@@ -43,10 +56,12 @@ export function RelationshipGraph({
   depth = 1,
   unresolvedCount = 0,
   selectedNodeId = null,
+  selectedEdgeKey = null,
   hasRendered = false,
   statusFilter = "verified_pending",
   totalResults = 0,
   onSelectNode,
+  onSelectEdge,
   onRefocusNode
 }: RelationshipGraphProps) {
   const [zoom, setZoom] = useState(1);
@@ -56,20 +71,91 @@ export function RelationshipGraph({
     focusLabel ?? (activeFocusId ? labelById.get(activeFocusId) : undefined) ?? "Focus act"
   );
 
-  const externalEdges = useMemo(
-    () => edges.filter((edge) => edge.source !== edge.target),
-    [edges]
-  );
-  const selfLoopCount = edges.length - externalEdges.length;
+  const aggregatedEdges = useMemo(() => withPairOffsets(aggregateGraphEdges(edges)), [edges]);
+  const selfLoopCount = edges.filter((edge) => edge.source === edge.target).length;
   const graphNodes = useMemo(
-    () => visibleNodes(nodes, externalEdges, activeFocusId),
-    [nodes, externalEdges, activeFocusId]
+    () => visibleNodes(nodes, aggregatedEdges, activeFocusId),
+    [nodes, aggregatedEdges, activeFocusId]
   );
-  const selfLoopOnly = edges.length > 0 && externalEdges.length === 0;
+  const selfLoopOnly = edges.length > 0 && aggregatedEdges.length === 0;
+  const selectedLink = aggregatedEdges.find((edge) => edge.key === selectedEdgeKey) ?? null;
+  const svgRef = useRef<SVGSVGElement>(null);
+  const dragRef = useRef<{ id: string; offset: GraphPoint } | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, GraphPoint>>({});
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const layoutKey = `${activeFocusId ?? ""}:${graphNodes.map((node) => node.id).join(",")}`;
+
+  useEffect(() => {
+    setOverrides({});
+    setDraggingId(null);
+    dragRef.current = null;
+  }, [layoutKey]);
+
+  useEffect(() => {
+    if (!draggingId) return;
+
+    function onMove(event: PointerEvent) {
+      const drag = dragRef.current;
+      const svg = svgRef.current;
+      if (!drag || !svg) return;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const next = dragNodePosition(
+        { x: event.clientX, y: event.clientY },
+        rect,
+        zoom,
+        drag.offset
+      );
+      setOverrides((current) => ({ ...current, [drag.id]: next }));
+    }
+
+    function onUp() {
+      dragRef.current = null;
+      setDraggingId(null);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [draggingId, zoom]);
+
+  function positionOf(id: string) {
+    return resolvedNodePosition(id, graphNodes, activeFocusId, overrides);
+  }
+
+  function beginNodeDrag(nodeId: string, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const local = clientPointToGraph({ x: event.clientX, y: event.clientY }, rect, zoom);
+    const pos = positionOf(nodeId);
+    dragRef.current = {
+      id: nodeId,
+      offset: { x: local.x - pos.x, y: local.y - pos.y }
+    };
+    setDraggingId(nodeId);
+    onSelectNode?.(nodeId);
+  }
+
+  function resetView() {
+    setZoom(1);
+    setOverrides({});
+    setDraggingId(null);
+    dragRef.current = null;
+  }
 
   if (!edges.length) {
     return (
-      <div className="relative min-h-[560px] overflow-hidden rounded-lg border border-[#e4ddcd] bg-[#fbf9f3] shadow-[0_1px_2px_rgba(15,32,51,0.04)]">
+      <div className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#e4ddcd] bg-[#fbf9f3] shadow-[0_1px_2px_rgba(15,32,51,0.04)]">
         <EmptyGraphState
           unresolvedCount={unresolvedCount}
           hasRendered={hasRendered}
@@ -84,12 +170,12 @@ export function RelationshipGraph({
   if (selfLoopOnly) {
     const focusNode = nodes.find((node) => node.id === activeFocusId) ?? nodes[0];
     return (
-      <div className="relative min-h-[560px] overflow-hidden rounded-lg border border-[#e4ddcd] bg-[#fbf9f3] shadow-[0_1px_2px_rgba(15,32,51,0.04)]">
+      <div className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#e4ddcd] bg-[#fbf9f3] shadow-[0_1px_2px_rgba(15,32,51,0.04)]">
         <GraphChrome
           displayFocusLabel={displayFocusLabel}
           depth={depth}
-          nodeCount={1}
-          edgeCount={edges.length}
+          citationCount={0}
+          linkedCount={0}
         />
         <SelfReferentialGraphState
           focusNode={focusNode}
@@ -104,17 +190,18 @@ export function RelationshipGraph({
   }
 
   return (
-    <div className="relative min-h-[560px] overflow-hidden rounded-lg border border-[#e4ddcd] bg-[#fbf9f3] shadow-[0_1px_2px_rgba(15,32,51,0.04)]">
+    <div className="relative min-h-[420px] overflow-hidden rounded-lg border border-[#e4ddcd] bg-[#fbf9f3] shadow-[0_1px_2px_rgba(15,32,51,0.04)]">
       <GraphChrome
         displayFocusLabel={displayFocusLabel}
         depth={depth}
-        nodeCount={graphNodes.length}
-        edgeCount={externalEdges.length}
+        citationCount={totalCitationCount(aggregatedEdges)}
+        linkedCount={activeFocusId ? neighborCount(activeFocusId, aggregatedEdges) : graphNodes.length}
       />
 
       <svg
-        viewBox="0 0 784 560"
-        className="h-[560px] w-full"
+        ref={svgRef}
+        viewBox={`0 0 ${GRAPH_VIEW.width} ${GRAPH_VIEW.height}`}
+        className="pointer-events-none h-[420px] w-full"
         role="img"
         aria-label="Mapped Act-to-Act relationship graph"
         style={{
@@ -135,116 +222,73 @@ export function RelationshipGraph({
             <path d="M 0 0 L 10 5 L 0 10 z" fill="#626b78" />
           </marker>
         </defs>
-        <g transform={`translate(${392 * (1 - zoom)} ${280 * (1 - zoom)}) scale(${zoom})`}>
-          {externalEdges.slice(0, 24).map((edge) => {
-            const source = positionFor(edge.source, graphNodes, activeFocusId);
-            const target = positionFor(edge.target, graphNodes, activeFocusId);
-            const pending = edge.status !== "VERIFIED";
-            return (
-              <g key={edge.id}>
-                <line
-                  x1={source.x}
-                  y1={source.y}
-                  x2={target.x}
-                  y2={target.y}
-                  stroke={relationshipColor(edge.label)}
-                  strokeWidth="1.5"
-                  strokeDasharray={pending ? "5 5" : undefined}
-                  markerEnd="url(#arrow)"
-                />
-                <foreignObject
-                  x={(source.x + target.x) / 2 - 56}
-                  y={(source.y + target.y) / 2 - 16}
-                  width="112"
-                  height="32"
-                >
-                  <div
-                    className={cn(
-                      "mx-auto w-fit max-w-[108px] rounded-full border px-2.5 py-1 text-center text-[10px] font-semibold leading-tight tracking-wide shadow-sm",
-                      pending
-                        ? "border-dashed border-[#e6d8b4] bg-[#fffdf8] text-[#92681f]"
-                        : edgeBadgeClass(edge.label)
-                    )}
-                  >
-                    {edgeLabel(edge.label, pending)}
-                  </div>
-                </foreignObject>
-              </g>
-            );
-          })}
-          {graphNodes.map((node) => {
-            const position = positionFor(node.id, graphNodes, activeFocusId);
+        <g
+          className="pointer-events-auto"
+          transform={`translate(${392 * (1 - zoom)} ${280 * (1 - zoom)}) scale(${zoom})`}
+        >
+          {aggregatedEdges.slice(0, 24).map((edge) => (
+            <GraphEdgeLink
+              key={edge.key}
+              edge={edge}
+              source={positionOf(edge.source)}
+              target={positionOf(edge.target)}
+              sourceLabel={labelById.get(edge.source) ?? edge.source}
+              targetLabel={labelById.get(edge.target) ?? edge.target}
+              selected={edge.key === selectedEdgeKey}
+              onSelect={onSelectEdge}
+            />
+          ))}
+          {paintOrder(graphNodes, draggingId).map((node) => {
+            const position = positionOf(node.id);
             const isFocus = node.id === activeFocusId;
-            const isSelected = node.id === selectedNodeId;
-            const pending = externalEdges.some(
-              (edge) =>
-                (edge.source === node.id || edge.target === node.id) && edge.status !== "VERIFIED"
+            const isSelected = isNodeSelected(node.id, selectedNodeId, selectedLink);
+            const pending = aggregatedEdges.some(
+              (edge) => (edge.source === node.id || edge.target === node.id) && edge.pending
             );
-            const edgeCount = externalEdges.filter(
-              (edge) => edge.source === node.id || edge.target === node.id
-            ).length;
+            const neighbors = neighborCount(node.id, aggregatedEdges);
+            const citations = incidentCitationCount(node.id, aggregatedEdges);
+            const detail = isFocus ? countLabel(neighbors, "linked Act") : countLabel(citations, "citation");
             return (
-              <foreignObject key={node.id} x={position.x - 90} y={position.y - 42} width="180" height="96">
-                <button
-                  type="button"
-                  className={cn(
-                    "flex w-full flex-col items-start rounded-lg border bg-card px-3.5 py-2.5 text-left shadow-sm transition-shadow",
-                    isFocus
-                      ? "border-[#b8955a] bg-[#fffbf2] shadow-[0_8px_24px_rgba(15,32,51,0.07)]"
-                      : pending
-                        ? "border-dashed border-[#1e3a5f]/55 opacity-70"
-                        : "border-[#1e3a5f]",
-                    isSelected && !isFocus ? "ring-2 ring-[#b8955a]/40" : ""
-                  )}
-                  onClick={() => onSelectNode?.(node.id)}
-                  onDoubleClick={() => onRefocusNode?.(node.id)}
-                >
-                  <div className="flex w-full items-center justify-between gap-2">
-                    <span
-                      className={cn(
-                        "text-[9.5px] font-semibold tracking-[0.57px] uppercase",
-                        isFocus ? "text-[#92681f]" : "text-muted-foreground"
-                      )}
-                    >
-                      {isFocus ? `Focus · ${node.type}` : node.type}
-                    </span>
-                    {isFocus ? (
-                      <span className="rounded-full border border-border bg-background px-1.5 text-[10px] font-semibold text-muted-foreground">
-                        {Math.min(edgeCount, 99)}
-                      </span>
-                    ) : null}
-                  </div>
-                  <span className="mt-1 line-clamp-2 font-serif text-[13px] font-semibold leading-snug text-[#14263c]">
-                    {readableActLabel(node.label)}
-                  </span>
-                  <span className="mt-1 text-[11px] text-muted-foreground">
-                    {pending ? "Pending references" : "Verified"}
-                  </span>
-                </button>
-              </foreignObject>
+              <GraphNodeCard
+                key={node.id}
+                node={node}
+                position={position}
+                isFocus={isFocus}
+                isSelected={isSelected}
+                pending={pending}
+                detail={detail}
+                dragging={draggingId === node.id}
+                onPointerDown={(event) => beginNodeDrag(node.id, event)}
+                onSelect={() => onSelectNode?.(node.id)}
+                onDoubleClick={() => onRefocusNode?.(node.id)}
+              />
             );
           })}
         </g>
       </svg>
 
-      <GraphControls zoom={zoom} setZoom={setZoom} />
+      <GraphControls setZoom={setZoom} onResetView={resetView} />
 
       <div className="absolute right-4 bottom-5 flex flex-wrap gap-3 rounded-full border border-[#e4ddcd] bg-card/90 px-4 py-2 text-[11px] text-muted-foreground shadow-[0_4px_12px_rgba(11,22,38,0.08)] backdrop-blur-sm">
         <LegendSwatch color="#8c2433" label="Amends" />
         <LegendSwatch color="#22684a" label="Inserts" />
         <LegendSwatch color="#1e3a5f" label="Refers to" />
         <span className="inline-flex items-center gap-1.5">
+          <span className="h-1 w-5 rounded-sm bg-[#1e3a5f]" aria-hidden />
+          <span>More citations</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5">
           <span className="h-0.5 w-3.5 border-t-2 border-dashed border-[#92681f]" aria-hidden />
-          Pending
+          <span>Pending</span>
         </span>
       </div>
 
       <p className="sr-only">
         Mapped Act-to-Act graph edges only. Unresolved relationships: {unresolvedCount}.{" "}
-        {externalEdges
+        {aggregatedEdges
           .map(
             (edge) =>
-              `${labelById.get(edge.source) ?? edge.source} ${edge.label} ${labelById.get(edge.target) ?? edge.target}.`
+              `${labelById.get(edge.source) ?? edge.source} ${displayEdgeLabel(edge.label, edge.count)} ${labelById.get(edge.target) ?? edge.target}.`
           )
           .join(" ")}
       </p>
@@ -252,34 +296,197 @@ export function RelationshipGraph({
   );
 }
 
+function GraphEdgeLink({
+  edge,
+  source,
+  target,
+  sourceLabel,
+  targetLabel,
+  selected,
+  onSelect
+}: Readonly<{
+  edge: AggregatedGraphEdge & { pairOffset: number };
+  source: { x: number; y: number };
+  target: { x: number; y: number };
+  sourceLabel: string;
+  targetLabel: string;
+  selected: boolean;
+  onSelect?: (edge: GraphEdgeSelection) => void;
+}>) {
+  const geometry = linkGeometry(source, target, edge.pairOffset);
+  const width = edgeStrokeWidth(edge.count);
+  const caption = displayEdgeLabel(edge.label, edge.count);
+
+  function selectEdge() {
+    onSelect?.({ source: edge.source, target: edge.target, label: edge.label, count: edge.count });
+  }
+
+  return (
+    <g
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={`${readableActLabel(sourceLabel)} ${caption} ${readableActLabel(targetLabel)}`}
+      className="cursor-pointer outline-none"
+      onClick={selectEdge}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectEdge();
+        }
+      }}
+    >
+      <path d={geometry.d} fill="none" stroke="transparent" strokeWidth="14" />
+      <path
+        d={geometry.d}
+        fill="none"
+        stroke={relationshipColor(edge.label)}
+        strokeWidth={selected ? width + 1.5 : width}
+        strokeDasharray={edge.pending ? "6 5" : undefined}
+        markerEnd="url(#arrow)"
+      />
+      <foreignObject x={geometry.label.x - 70} y={geometry.label.y - 16} width="140" height="32">
+        <div
+          className={cn(
+            "mx-auto w-fit max-w-[136px] rounded-full border px-2.5 py-1 text-center text-[10px] font-semibold leading-tight tracking-wide shadow-sm",
+            edge.pending
+              ? "border-dashed border-[#e6d8b4] bg-[#fffdf8] text-[#92681f]"
+              : edgeBadgeClass(edge.label),
+            selected ? "ring-2 ring-[#b8955a]/50" : ""
+          )}
+        >
+          {caption}
+        </div>
+      </foreignObject>
+    </g>
+  );
+}
+
+function linkGeometry(
+  source: { x: number; y: number },
+  target: { x: number; y: number },
+  pairOffset: number
+) {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const magnitude = pairOffset * 36;
+  const controlX = (source.x + target.x) / 2 + (-dy / len) * magnitude;
+  const controlY = (source.y + target.y) / 2 + (dx / len) * magnitude;
+  const d =
+    pairOffset === 0
+      ? `M ${source.x} ${source.y} L ${target.x} ${target.y}`
+      : `M ${source.x} ${source.y} Q ${controlX} ${controlY} ${target.x} ${target.y}`;
+  return { d, label: { x: controlX, y: controlY } };
+}
+
+function isNodeSelected(
+  nodeId: string,
+  selectedNodeId: string | null,
+  selectedLink: AggregatedGraphEdge | null
+) {
+  if (selectedLink) return nodeId === selectedLink.source || nodeId === selectedLink.target;
+  return nodeId === selectedNodeId;
+}
+
+function GraphNodeCard({
+  node,
+  position,
+  isFocus,
+  isSelected,
+  pending,
+  detail,
+  dragging,
+  onPointerDown,
+  onSelect,
+  onDoubleClick
+}: Readonly<{
+  node: Node;
+  position: GraphPoint;
+  isFocus: boolean;
+  isSelected: boolean;
+  pending: boolean;
+  detail: string;
+  dragging: boolean;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onSelect: () => void;
+  onDoubleClick: () => void;
+}>) {
+  return (
+    <foreignObject x={position.x - 90} y={position.y - 42} width="180" height="88">
+      <button
+        type="button"
+        aria-grabbed={dragging}
+        className={cn(
+          "flex w-full cursor-grab flex-col items-start rounded-lg border bg-card px-3.5 py-2.5 text-left shadow-sm select-none touch-none",
+          nodeCardTone(isFocus, pending),
+          isSelected && !isFocus ? "ring-2 ring-[#b8955a]/40" : "",
+          dragging ? "cursor-grabbing shadow-lg" : ""
+        )}
+        onPointerDown={onPointerDown}
+        onClick={onSelect}
+        onDoubleClick={onDoubleClick}
+      >
+        <span
+          className={cn(
+            "text-[9.5px] font-semibold tracking-[0.57px] uppercase",
+            isFocus ? "text-[#92681f]" : "text-muted-foreground"
+          )}
+        >
+          {isFocus ? "This Act" : "Linked Act"}
+        </span>
+        <span className="mt-1 line-clamp-2 font-serif text-[13px] font-semibold leading-snug text-[#14263c]">
+          {readableActLabel(node.label)}
+        </span>
+        <span className="mt-1 text-[11px] text-muted-foreground">{detail}</span>
+      </button>
+    </foreignObject>
+  );
+}
+
+function paintOrder(nodes: Node[], draggingId: string | null) {
+  if (!draggingId) return nodes;
+  const dragging = nodes.find((node) => node.id === draggingId);
+  if (!dragging) return nodes;
+  return [...nodes.filter((node) => node.id !== draggingId), dragging];
+}
+
 function GraphChrome({
   displayFocusLabel,
   depth,
-  nodeCount,
-  edgeCount
+  linkedCount,
+  citationCount
 }: Readonly<{
   displayFocusLabel: string;
   depth: number;
-  nodeCount: number;
-  edgeCount: number;
+  citationCount: number;
+  linkedCount: number;
 }>) {
   return (
-    <div className="absolute top-3.5 left-3.5 z-10 flex max-w-[calc(100%-2rem)] items-center gap-2 rounded-full border border-[#e4ddcd] bg-card/80 px-3 py-1.5 text-xs shadow-sm backdrop-blur-sm">
-      <span className="size-[7px] shrink-0 rounded-[3px] bg-[#b8955a]" aria-hidden />
-      <span className="shrink-0 text-[#14263c]">Focus:</span>
-      <strong className="truncate font-semibold text-[#14263c]">{shortLabel(displayFocusLabel, 34)}</strong>
-      <span className="shrink-0 whitespace-nowrap text-[#14263c]">
-        · {depth} hop{depth === 1 ? "" : "s"} · {nodeCount} node{nodeCount === 1 ? "" : "s"} · {edgeCount} edge
-        {edgeCount === 1 ? "" : "s"}
-      </span>
+    <div className="absolute top-3.5 left-3.5 z-10 flex max-w-[calc(100%-2rem)] flex-col gap-1 rounded-[18px] border border-[#e4ddcd] bg-card/85 px-3 py-2 text-xs shadow-sm backdrop-blur-sm">
+      <div className="flex items-center gap-2">
+        <span className="size-[7px] shrink-0 rounded-[3px] bg-[#b8955a]" aria-hidden />
+        <span className="shrink-0 text-[#14263c]">Focus:</span>
+        <strong className="truncate font-semibold text-[#14263c]">{shortLabel(displayFocusLabel, 34)}</strong>
+        <span className="shrink-0 whitespace-nowrap text-[#14263c]">
+          · {countLabel(depth, "hop")} · {countLabel(linkedCount, "linked Act")}
+          {citationCount ? ` · ${countLabel(citationCount, "citation")}` : ""}
+        </span>
+      </div>
+      <p className="pl-[15px] text-[11px] text-muted-foreground">
+        Overview map · click a node or line to open citations
+      </p>
     </div>
   );
 }
 
 function GraphControls({
-  zoom,
-  setZoom
-}: Readonly<{ zoom: number; setZoom: (value: number | ((current: number) => number)) => void }>) {
+  setZoom,
+  onResetView
+}: Readonly<{
+  setZoom: (value: number | ((current: number) => number)) => void;
+  onResetView: () => void;
+}>) {
   return (
     <div className="absolute bottom-5 left-4 flex flex-col overflow-hidden rounded-md border border-[#e4ddcd] bg-card shadow-[0_4px_12px_rgba(11,22,38,0.08)]">
       <Button
@@ -307,8 +514,8 @@ function GraphControls({
         variant="ghost"
         size="icon-sm"
         className="rounded-none"
-        aria-label="Reset zoom"
-        onClick={() => setZoom(1)}
+        aria-label="Reset view"
+        onClick={onResetView}
       >
         <Maximize2 className="size-3.5" />
       </Button>
@@ -334,7 +541,7 @@ function SelfReferentialGraphState({
   if (!focusNode) return null;
   const isSelected = selectedNodeId === focusNode.id;
   return (
-    <div className="flex h-[560px] flex-col items-center justify-center gap-5 px-8 py-10 text-center">
+    <div className="flex h-[420px] flex-col items-center justify-center gap-5 px-8 py-10 text-center">
       <button
         type="button"
         className={cn(
@@ -402,7 +609,7 @@ function EmptyGraphState({
   }
 
   return (
-    <div className="flex h-full min-h-[560px] flex-col items-center justify-center gap-3 px-8 py-16 text-center">
+    <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-3 px-8 py-16 text-center">
       <p className="max-w-lg text-[15px] leading-6 text-[#14263c]">{title}</p>
       <p className="max-w-md text-xs leading-5 text-muted-foreground">{subtitle}</p>
     </div>
@@ -418,7 +625,11 @@ function readableActLabel(label: string | null | undefined) {
   });
 }
 
-function visibleNodes(nodes: Node[], edges: Edge[], focusId: string | null) {
+function visibleNodes(
+  nodes: Node[],
+  edges: { source: string; target: string }[],
+  focusId: string | null
+) {
   const ids = new Set<string>();
   if (focusId) ids.add(focusId);
   for (const edge of edges) {
@@ -437,24 +648,6 @@ function LegendSwatch({ color, label }: Readonly<{ color: string; label: string 
   );
 }
 
-const positions = [
-  { x: 376, y: 252 },
-  { x: 126, y: 236 },
-  { x: 610, y: 212 },
-  { x: 236, y: 436 },
-  { x: 548, y: 436 },
-  { x: 392, y: 96 },
-  { x: 120, y: 360 },
-  { x: 660, y: 360 }
-];
-
-function positionFor(id: string, nodes: Node[], focusId: string | null) {
-  if (focusId && id === focusId) return positions[0]!;
-  const others = nodes.filter((node) => node.id !== focusId);
-  const index = Math.max(0, others.findIndex((node) => node.id === id));
-  return positions[(index % (positions.length - 1)) + 1] ?? positions[1]!;
-}
-
 function relationshipColor(label: string) {
   if (label.includes("AMEND") || label.includes("REPEAL")) return "#8c2433";
   if (label.includes("INSERT") || label.includes("ADD")) return "#22684a";
@@ -471,9 +664,14 @@ function edgeBadgeClass(label: string) {
   return "border-[#c8d5e2] bg-[#fffefb] text-[#1e3a5f]";
 }
 
-function edgeLabel(label: string, pending: boolean) {
-  const base = label.replaceAll("_", " ").toLowerCase();
-  return pending ? `${base} · pending` : base;
+function nodeCardTone(isFocus: boolean, pending: boolean) {
+  if (isFocus) return "border-[#b8955a] bg-[#fffbf2] shadow-[0_8px_24px_rgba(15,32,51,0.07)]";
+  if (pending) return "border-dashed border-[#1e3a5f]/55 opacity-70";
+  return "border-[#1e3a5f]";
+}
+
+function countLabel(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function shortLabel(label: string, max = 28) {

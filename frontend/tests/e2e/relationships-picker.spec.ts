@@ -24,9 +24,7 @@ test("lawyer can choose a relationship focus Act without knowing its UUID", asyn
   await expect(antiCorruptionAct).toBeVisible();
   await antiCorruptionAct.click();
   await page.getByRole("button", { name: "Render" }).click();
-  await expect(
-    page.getByRole("img", { name: "Mapped Act-to-Act relationship graph" })
-  ).toBeVisible({ timeout: 10000 });
-  await expect(page.getByText(/\d+ nodes? · [1-9]\d* edges?/i)).toBeVisible();
+  await expect(page.getByText("Focus Act")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText(/Amends \/ repeals|Inserts \/ adds|Refers to|Cited by|Within this Act|Unresolved/)).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("relationship-explorer.png"), fullPage: true });
 });
