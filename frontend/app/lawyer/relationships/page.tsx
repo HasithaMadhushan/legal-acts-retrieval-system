@@ -26,6 +26,7 @@ import type {
   VerificationStatus
 } from "@/lib/types";
 import { RelationshipGraph } from "@/components/relationship-graph";
+import { RelationshipDossier } from "@/components/relationship-dossier";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,14 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { graphEdgeKey, type GraphEdgeSelection } from "@/lib/graph-edges";
+import { otherActId } from "@/lib/linked-acts";
+import {
+  buildRelationshipDossier,
+  dossierGroupKeyFromEdge,
+  dossierKeyForAct
+} from "@/lib/relationship-dossier";
+import { fetchAllRelationshipRows } from "@/lib/relationship-pages";
 import { cn } from "@/lib/utils";
 
 type LookupMode = "act" | "section";
@@ -61,9 +70,12 @@ export default function LawyerRelationshipsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("verified_pending");
   const [depth, setDepth] = useState<1 | 2>(2);
   const [relationships, setRelationships] = useState<RelationshipListResponse | null>(null);
+  const [dossierRows, setDossierRows] = useState<RelationshipRow[]>([]);
   const [graph, setGraph] = useState<RelationshipGraphResponse | null>(null);
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<GraphEdgeSelection | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -106,16 +118,29 @@ export default function LawyerRelationshipsPage() {
     }
   }
 
-  function queryParams(nextOffset: number, nextDepth: number) {
+  function filterParams() {
     return {
       ...(relationshipType !== "ANY" ? { relationship_type: relationshipType } : {}),
       ...(statusFilter !== "verified_pending" && statusFilter !== "ANY"
         ? { verification_status: statusFilter }
-        : {}),
+        : {})
+    };
+  }
+
+  function queryParams(nextOffset: number, nextDepth: number) {
+    return {
+      ...filterParams(),
       limit,
       offset: String(nextOffset),
       depth: String(nextDepth)
     };
+  }
+
+  async function loadListPage(mode: LookupMode, id: string, offset: number, pageLimit: number) {
+    const params = { ...filterParams(), limit: String(pageLimit), offset: String(offset) };
+    return mode === "act"
+      ? getActRelationships(id, params)
+      : getSectionRelationships(id, params);
   }
 
   async function loadRelationships(
@@ -131,22 +156,33 @@ export default function LawyerRelationshipsPage() {
     setError("");
     setLoading(true);
     try {
+      const trimmedId = id.trim();
       const params = queryParams(nextOffset, nextDepth);
-      const relationshipData =
-        mode === "act"
-          ? await getActRelationships(id.trim(), params)
-          : await getSectionRelationships(id.trim(), params);
-      const graphData = await getRelationshipGraph({
-        ...params,
-        ...(mode === "act" ? { act_id: id.trim() } : { section_id: id.trim() })
+      const [graphData, catalog] = await Promise.all([
+        getRelationshipGraph({
+          ...params,
+          ...(mode === "act" ? { act_id: trimmedId } : { section_id: trimmedId })
+        }),
+        fetchAllRelationshipRows((pageOffset, pageLimit) =>
+          loadListPage(mode, trimmedId, pageOffset, pageLimit)
+        )
+      ]);
+      const tableLimit = Number(limit);
+      setRelationships({
+        ...catalog.list,
+        relationships: catalog.rows.slice(nextOffset, nextOffset + tableLimit),
+        limit: tableLimit,
+        offset: nextOffset
       });
-      setRelationships(relationshipData);
+      setDossierRows(catalog.rows);
       setGraph(graphData);
       setOffset(nextOffset);
-      setSelectedNodeId(mode === "act" ? id.trim() : graphData.nodes[0]?.id ?? null);
+      setSelectedNodeId(mode === "act" ? trimmedId : graphData.nodes[0]?.id ?? null);
+      setSelectedEdge(null);
+      setExpandedKey(null);
       if (mode === "act") {
         try {
-          setFocusAct(await getAct(id.trim()));
+          setFocusAct(await getAct(trimmedId));
         } catch {
           setFocusAct(acts.find((act) => act.id === id) ?? null);
         }
@@ -173,11 +209,6 @@ export default function LawyerRelationshipsPage() {
     setFocusId(nodeId);
     setDepth(1);
     await loadRelationships("act", nodeId, 0, 1);
-  }
-
-  async function expandOneHop() {
-    setDepth(2);
-    await loadRelationships(lookupMode, focusId, 0, 2);
   }
 
   async function saveRelationship(row: RelationshipRow) {
@@ -237,46 +268,29 @@ export default function LawyerRelationshipsPage() {
   }
 
   const summary = relationships?.summary;
-  const rows = relationships?.relationships ?? [];
+  const tableLimit = Number(limit);
+  const rows = dossierRows.slice(offset, offset + tableLimit);
   const canPageBack = offset > 0;
-  const canPageForward = relationships
-    ? offset + relationships.limit < relationships.total_results
-    : false;
+  const canPageForward = offset + tableLimit < dossierRows.length;
   const focusActRecord =
     focusAct ??
     (focusId ? acts.find((act) => act.id === focusId) ?? null : null);
-  const focusLabel = focusActRecord
-    ? displayActTitle(focusActRecord)
-    : displayActTitle({
-        title: graph?.nodes.find((node) => node.id === focusId)?.label,
-        act_number: null,
-        year: null,
-        source_file_name: null
-      });
-  const focusSelectLabel = focusLabel || (focusId ? "Selected Act" : "");
+  const focusLabel = !focusId
+    ? ""
+    : focusActRecord
+      ? displayActTitle(focusActRecord)
+      : displayActTitle({
+          title: graph?.nodes.find((node) => node.id === focusId)?.label,
+          act_number: null,
+          year: null,
+          source_file_name: null
+        });
+  const focusSelectLabel = focusId ? focusLabel || "Selected Act" : "";
   const focusSelectTitle = focusActRecord
     ? displayActTitleWithMeta(focusActRecord)
     : focusSelectLabel;
-  const selectedConnections = rows.filter(
-    (row) =>
-      row.source_act_id === selectedNodeId ||
-      row.target_act_id === selectedNodeId ||
-      (!selectedNodeId && (row.source_act_id === focusId || row.target_act_id === focusId))
-  );
-  const panelNodeId = selectedNodeId ?? (lookupMode === "act" ? focusId : null);
-  const panelAct =
-    (panelNodeId && acts.find((act) => act.id === panelNodeId)) ||
-    (panelNodeId === focusAct?.id ? focusAct : null) ||
-    null;
-  const panelLabel = panelAct
-    ? displayActTitle(panelAct)
-    : displayActTitle({
-        title: graph?.nodes.find((node) => node.id === panelNodeId)?.label,
-        act_number: null,
-        year: null,
-        source_file_name: null
-      }) || focusLabel;
-  const panelTitle = panelAct ? displayActTitleWithMeta(panelAct) : panelLabel;
+  const dossierFocusId = lookupMode === "act" ? focusId : graph?.nodes[0]?.id ?? "";
+  const dossierSections = buildRelationshipDossier(dossierRows, dossierFocusId);
 
   return (
     <RoleGuard allowed={["ADMIN", "LAWYER"]} path="/lawyer/relationships">
@@ -287,8 +301,7 @@ export default function LawyerRelationshipsPage() {
               Relationship explorer
             </h1>
             <p className="mt-2 text-[14.5px] leading-[23px] text-muted-foreground">
-              How Acts amend, repeal, insert into or refer to each other. Click a node to inspect it;
-              double-click to refocus the graph.
+              The map is an overview. Citations are grouped on the right by type, then by Act. Click a linked Act or a line to open that group; double-click a node to make it the focus.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -432,7 +445,7 @@ export default function LawyerRelationshipsPage() {
         {workspaceMessage ? <p className="text-sm text-muted-foreground">{workspaceMessage}</p> : null}
 
         {viewMode === "graph" ? (
-          <div className="grid gap-[18px] xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="grid items-start gap-[18px] xl:grid-cols-[minmax(0,1fr)_minmax(380px,1fr)]">
             <RelationshipGraph
               nodes={graph?.nodes ?? []}
               edges={graph?.edges ?? []}
@@ -444,19 +457,42 @@ export default function LawyerRelationshipsPage() {
               statusFilter={statusFilter}
               totalResults={summary?.total_results ?? 0}
               selectedNodeId={selectedNodeId}
-              onSelectNode={setSelectedNodeId}
+              selectedEdgeKey={selectedEdge ? graphEdgeKey(selectedEdge) : null}
+              onSelectNode={(nodeId) => {
+                setSelectedEdge(null);
+                setSelectedNodeId(nodeId);
+                setExpandedKey(
+                  nodeId === dossierFocusId ? null : dossierKeyForAct(dossierSections, nodeId)
+                );
+              }}
+              onSelectEdge={(edge) => {
+                setSelectedEdge(edge);
+                setSelectedNodeId(otherActId(edge, dossierFocusId) ?? edge.target);
+                setExpandedKey(dossierGroupKeyFromEdge(dossierFocusId, edge));
+              }}
               onRefocusNode={(nodeId) => void refocusOnNode(nodeId)}
             />
-            <SelectedNodePanel
-              act={panelAct}
-              label={panelLabel || "Select a node"}
-              title={panelTitle}
+            <RelationshipDossier
+              focusLabel={focusLabel}
+              focusTitle={focusSelectTitle}
+              focusAct={focusActRecord}
               summary={summary}
-              connections={selectedConnections.slice(0, 6)}
-              hasFocus={Boolean(panelNodeId)}
-              onOpenAct={panelNodeId ? `/acts/${panelNodeId}` : null}
-              onExpand={() => void expandOneHop()}
-              expandDisabled={depth === 2 || loading || !focusId}
+              sections={dossierSections}
+              hasRendered={Boolean(relationships)}
+              loading={loading}
+              expandedKey={expandedKey}
+              onToggleGroup={(key) => {
+                setExpandedKey((current) => (current === key ? null : key));
+                const group = dossierSections
+                  .flatMap((section) => section.groups)
+                  .find((entry) => entry.key === key);
+                if (group?.counterpartId) {
+                  setSelectedEdge(null);
+                  setSelectedNodeId(group.counterpartId);
+                }
+              }}
+              onOpenTable={() => setViewMode("table")}
+              onRefocusAct={(actId) => void refocusOnNode(actId)}
             />
           </div>
         ) : null}
@@ -481,22 +517,14 @@ export default function LawyerRelationshipsPage() {
             {relationships ? (
               <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
                 <span>
-                  Showing {relationships.offset + 1}-{relationships.offset + rows.length} of{" "}
-                  {relationships.total_results}
+                  Showing {offset + 1}-{offset + rows.length} of {dossierRows.length}
                 </span>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   disabled={!canPageBack || loading}
-                  onClick={() =>
-                    void loadRelationships(
-                      lookupMode,
-                      focusId,
-                      Math.max(0, offset - relationships.limit),
-                      depth
-                    )
-                  }
+                  onClick={() => setOffset(Math.max(0, offset - tableLimit))}
                 >
                   Previous page
                 </Button>
@@ -505,7 +533,7 @@ export default function LawyerRelationshipsPage() {
                   variant="outline"
                   size="sm"
                   disabled={!canPageForward || loading}
-                  onClick={() => void loadRelationships(lookupMode, focusId, offset + relationships.limit, depth)}
+                  onClick={() => setOffset(offset + tableLimit)}
                 >
                   Next page
                 </Button>
@@ -515,151 +543,6 @@ export default function LawyerRelationshipsPage() {
         ) : null}
       </div>
     </RoleGuard>
-  );
-}
-
-function SelectedNodePanel({
-  act,
-  label,
-  title,
-  summary,
-  connections,
-  hasFocus,
-  onOpenAct,
-  onExpand,
-  expandDisabled
-}: Readonly<{
-  act: LegalAct | null;
-  label: string;
-  title: string;
-  summary: RelationshipListResponse["summary"] | undefined;
-  connections: RelationshipRow[];
-  hasFocus: boolean;
-  onOpenAct: string | null;
-  onExpand: () => void;
-  expandDisabled: boolean;
-}>) {
-  const verified = !connections.some((row) => row.verification_status !== "VERIFIED");
-  return (
-    <aside className="flex flex-col gap-4">
-      <p className="text-[11px] font-semibold tracking-[1.1px] text-[#92681f] uppercase">Selected node</p>
-      <div className="rounded-lg border border-border bg-card px-5 py-5 shadow-sm">
-        {!hasFocus ? (
-          <p className="text-sm text-muted-foreground">Choose an Act and render to inspect a node.</p>
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-2">
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium",
-                  verified
-                    ? "border-[#cfe0d4] bg-[#ebf3ee] text-[#22684a]"
-                    : "border-[#e6d8b4] bg-[#f6ebd4] text-[#92681f]"
-                )}
-              >
-                <span
-                  className={cn("size-1.5 rounded-[3px]", verified ? "bg-[#22684a]" : "bg-[#92681f]")}
-                  aria-hidden
-                />
-                {verified ? "Verified" : "Pending"}
-              </span>
-              <span className="rounded-[5px] bg-[#e2e9f0] px-2 py-0.5 text-[11px] font-semibold tracking-wide text-[#1e3a5f]">
-                Act
-              </span>
-            </div>
-            <h2
-              className="mt-2 line-clamp-3 font-serif text-[15.5px] font-bold leading-snug text-[#14263c]"
-              title={title}
-            >
-              {label}
-            </h2>
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              {actMetaLine(act)}
-            </p>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <StatChip value={summary?.total_results ?? 0} label="References" />
-              <StatChip value={summary?.outgoing_count ?? 0} label="Outgoing" />
-              <StatChip value={summary?.incoming_count ?? 0} label="Incoming" />
-            </div>
-            <div className="mt-3 flex gap-2">
-              {onOpenAct ? (
-                <Button
-                  size="sm"
-                  className="h-[30px] flex-1 text-[12.5px]"
-                  render={<Link href={onOpenAct} />}
-                  nativeButton={false}
-                >
-                  Open Act
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-[30px] flex-1 bg-card text-[12.5px]"
-                disabled={expandDisabled}
-                onClick={onExpand}
-              >
-                ＋ Expand 1 hop
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <p className="text-[11px] font-semibold tracking-[1.1px] text-[#92681f] uppercase">Connections</p>
-      <div className="rounded-lg border border-border bg-card px-4 py-2 shadow-sm">
-        {!connections.length ? (
-          <p className="px-1 py-3 text-sm text-muted-foreground">No connections for this node yet.</p>
-        ) : (
-          connections.map((row) => <ConnectionRow key={row.id} row={row} />)
-        )}
-      </div>
-
-      <div className="rounded-lg border border-[#ede8db] bg-[#f4ead6] px-4 py-3 text-[13px] leading-5 text-[#5c4a22]">
-        Dashed nodes and edges are <strong>pending</strong> — machine-extracted, awaiting admin
-        verification. Double-click any node to refocus the graph on it.
-      </div>
-    </aside>
-  );
-}
-
-function StatChip({ value, label }: Readonly<{ value: number; label: string }>) {
-  return (
-    <div className="rounded-md border border-[#ede8db] bg-[#fffdf8] px-2.5 py-2 text-center">
-      <p className="text-base font-semibold text-[#0b1626]">{value}</p>
-      <p className="text-[10.5px] text-muted-foreground">{label}</p>
-    </div>
-  );
-}
-
-function ConnectionRow({ row }: Readonly<{ row: RelationshipRow }>) {
-  const outgoing = row.direction === "outgoing";
-  const targetLabel = connectionLabel(row, outgoing);
-  return (
-    <div className="flex items-center gap-2 border-b border-[#ede8db] px-1 py-2.5 last:border-b-0">
-      <span
-        className={cn(
-          "rounded px-1.5 text-[10px] font-semibold tracking-wide",
-          outgoing ? "bg-[#f3e4e6] text-[#8c2433]" : "bg-[#e4ede7] text-[#22684a]"
-        )}
-      >
-        {outgoing ? "OUT" : "IN"}
-      </span>
-      <span
-        className={cn(
-          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11.5px] font-semibold",
-          typePillClass(row.relationship_type)
-        )}
-      >
-        <span aria-hidden>◆</span>
-        {formatType(row.relationship_type)}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-[12.5px] text-[#14263c]" title={targetLabel}>
-        {targetLabel}
-      </span>
-      <span className="text-[11.5px] text-muted-foreground">{row.confidence_score.toFixed(2)}</span>
-    </div>
   );
 }
 
@@ -796,46 +679,3 @@ function formatType(type: string) {
     .replace(/^\w/, (char) => char.toUpperCase());
 }
 
-function actMetaLine(act: LegalAct | null) {
-  if (!act) return "Mapped focus node";
-  const parts = [
-    act.certification_date ? `Certified ${formatDate(act.certification_date)}` : null,
-    act.parser_used || null,
-    act.page_count ? `${act.page_count} pages` : null
-  ].filter(Boolean);
-  return parts.length ? parts.join(" · ") : "Mapped focus node";
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
-
-function connectionLabel(row: RelationshipRow, outgoing: boolean) {
-  if (outgoing) {
-    if (row.target_section_number) {
-      return `${shortTitle(row.target_act_title)} s.${row.target_section_number}`;
-    }
-    return row.target_act_title ?? row.target_act_title_raw ?? "Unresolved target";
-  }
-  if (row.source_section_number) {
-    return `${shortTitle(row.source_act_title)} s.${row.source_section_number}`;
-  }
-  return row.source_act_title ?? row.source_act_id;
-}
-
-function shortTitle(title: string | null) {
-  const readable = displayActTitle({ title, act_number: null, year: null, source_file_name: null });
-  return readable.length > 22 ? `${readable.slice(0, 20)}…` : readable;
-}
-
-function typePillClass(type: string) {
-  if (type.includes("AMEND") || type.includes("REPEAL")) {
-    return "border-[#e3c3c8] bg-[#fbf3f4] text-[#8c2433]";
-  }
-  if (type.includes("INSERT") || type.includes("ADD")) {
-    return "border-[#cfe0d4] bg-[#ebf3ee] text-[#22684a]";
-  }
-  return "border-[#c8d5e2] bg-[#f0f4f8] text-[#1e3a5f]";
-}
