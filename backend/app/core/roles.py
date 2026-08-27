@@ -77,3 +77,10 @@ class SavedItemType(str, Enum):
 class ReadingHistoryItemType(str, Enum):
     ACT = "ACT"
     SECTION = "SECTION"
+
+
+class EmbeddingStatus(str, Enum):
+    PENDING = "PENDING"
+    READY = "READY"
+    FAILED = "FAILED"
+    STALE = "STALE"

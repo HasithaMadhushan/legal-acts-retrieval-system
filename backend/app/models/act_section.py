@@ -1,8 +1,11 @@
-from sqlalchemy import JSON, Enum, ForeignKey, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.roles import SectionType, VerificationStatus
+from app.core.roles import EmbeddingStatus, SectionType, VerificationStatus
 from app.db.base import Base
+from app.db.types import embedding_type
 from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -28,7 +31,18 @@ class ActSection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
         nullable=False,
     )
-    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(embedding_type, nullable=True)
+    embedding_provider: Mapped[str | None] = mapped_column(String(64))
+    embedding_model: Mapped[str | None] = mapped_column(String(255))
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer)
+    embedding_source_hash: Mapped[str | None] = mapped_column(String(64))
+    embedding_status: Mapped[EmbeddingStatus] = mapped_column(
+        Enum(EmbeddingStatus, name="embedding_status"),
+        default=EmbeddingStatus.PENDING,
+        nullable=False,
+    )
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime)
+    embedding_error: Mapped[str | None] = mapped_column(Text)
 
     act = relationship("LegalAct", back_populates="sections")
     parent_section = relationship("ActSection", remote_side="ActSection.id")
