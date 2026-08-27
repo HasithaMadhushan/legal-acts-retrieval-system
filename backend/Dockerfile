@@ -30,9 +30,16 @@ RUN mkdir -p /opt/pdf-inspector/models \
 
 FROM python:3.13-slim
 
+ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+ARG EMBEDDING_MODEL_REVISION=1110a243fdf4706b3f48f1d95db1a4f5529b4d41
+ARG HF_HOME=/opt/huggingface
+
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV EMBEDDING_MODEL=${EMBEDDING_MODEL}
+ENV EMBEDDING_MODEL_REVISION=${EMBEDDING_MODEL_REVISION}
+ENV HF_HOME=${HF_HOME}
 ENV PDFIUM_LIB_PATH=/opt/pdf-inspector/pdfium/lib/libpdfium.so
 ENV ORT_DYLIB_PATH=/opt/pdf-inspector/onnxruntime/lib/libonnxruntime.so.1.27.0
 ENV PDF_INSPECTOR_MODEL_CACHE=/opt/pdf-inspector/model-cache-disabled
@@ -43,6 +50,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
     torch==2.13.0+cpu torchvision==0.28.0+cpu
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Bake the configured embedding model into the image while network access is
+# available. Runtime model loading is offline and therefore reproducible.
+RUN python -c 'import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ["EMBEDDING_MODEL"], revision=os.environ["EMBEDDING_MODEL_REVISION"])'
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
 
 # Exercise the exact offline OCR path during the image build. Runtime parsing
 # always passes offline=True and therefore never downloads model artifacts.
