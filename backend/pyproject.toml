@@ -8,6 +8,9 @@ requires-python = ">=3.11"
 testpaths = ["app/tests"]
 pythonpath = ["."]
 addopts = "-q"
+markers = [
+    "no_hash_test_embeddings: do not force EMBEDDING_PROVIDER=hash-test via the autouse fixture",
+]
 
 [tool.ruff]
 line-length = 100

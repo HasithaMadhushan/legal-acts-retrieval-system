@@ -30,10 +30,10 @@ from app.main import app
 def use_hash_test_embeddings(request, monkeypatch):
     """Select deterministic embeddings through settings, not pytest process sniffing.
 
-    Config-unit tests construct Settings() to assert production defaults, so they
-    opt out. All other tests (including embed_text callers) use hash-test.
+    Tests that assert Settings defaults or non-test environments should mark
+    ``no_hash_test_embeddings`` so EMBEDDING_PROVIDER is not forced to hash-test.
     """
-    if request.fspath.basename == "test_config.py":
+    if request.node.get_closest_marker("no_hash_test_embeddings"):
         yield
         return
     monkeypatch.setenv("ENVIRONMENT", "test")
