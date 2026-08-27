@@ -1,4 +1,5 @@
 from functools import lru_cache
+from math import isfinite
 from pathlib import Path
 
 from pydantic import model_validator
@@ -75,10 +76,18 @@ class Settings(BaseSettings):
     llm_max_sections_per_act: int = 40
     # Semantic search is off until retrieval eval says it beats keyword search.
     semantic_search_enabled: bool = False
-    enable_pgvector: bool = False
-    embedding_provider: str = "hash"
-    embedding_model: str = "all-MiniLM-L6-v2"
+    enable_pgvector: bool = True
+    embedding_provider: str = "sentence-transformers"
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model_revision: str = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
     embedding_dimension: int = 384
+    embedding_batch_size: int = 32
+    embedding_device: str = "cpu"
+    embedding_normalize: bool = True
+    semantic_candidate_limit: int = 100
+    hybrid_rrf_k: int = 60
+    hybrid_keyword_weight: float = 1.0
+    hybrid_semantic_weight: float = 1.0
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -90,6 +99,44 @@ class Settings(BaseSettings):
                 "Refusing to start with the default SECRET_KEY while ENVIRONMENT=production. "
                 "Set a unique SECRET_KEY via environment variable or .env file."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_semantic_configuration(self) -> "Settings":
+        supported_providers = {"sentence-transformers", "hash-test"}
+        if self.embedding_provider not in supported_providers:
+            raise ValueError(
+                "Unsupported embedding provider. Use 'sentence-transformers' or 'hash-test'."
+            )
+        mini_lm_models = {
+            "all-MiniLM-L6-v2",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        }
+        if self.embedding_model in mini_lm_models and self.embedding_dimension != 384:
+            raise ValueError("all-MiniLM-L6-v2 produces exactly 384 dimensions")
+        if (
+            self.embedding_provider == "hash-test"
+            and self.environment.strip().lower() != "test"
+        ):
+            raise ValueError("The hash-test provider is only available when ENVIRONMENT=test")
+        if self.semantic_search_enabled and not self.enable_pgvector:
+            raise ValueError("Semantic search requires ENABLE_PGVECTOR=true")
+
+        positive_values = {
+            "EMBEDDING_BATCH_SIZE": self.embedding_batch_size,
+            "SEMANTIC_CANDIDATE_LIMIT": self.semantic_candidate_limit,
+            "HYBRID_RRF_K": self.hybrid_rrf_k,
+            "HYBRID_KEYWORD_WEIGHT": self.hybrid_keyword_weight,
+            "HYBRID_SEMANTIC_WEIGHT": self.hybrid_semantic_weight,
+        }
+        non_finite_names = [
+            name for name, value in positive_values.items() if not isfinite(value)
+        ]
+        if non_finite_names:
+            raise ValueError(f"{', '.join(non_finite_names)} must be finite")
+        invalid_names = [name for name, value in positive_values.items() if value <= 0]
+        if invalid_names:
+            raise ValueError(f"{', '.join(invalid_names)} must be greater than zero")
         return self
 
     @property
