@@ -24,13 +24,20 @@ router = APIRouter(prefix="/relationships", tags=["relationships"])
 DirectionFilter = Literal["outgoing", "incoming", "all"]
 MappedFilter = Literal["mapped", "unresolved"]
 ScopeType = Literal["act", "section"]
+VerificationStatusFilter = Literal[
+    "PENDING",
+    "VERIFIED",
+    "REJECTED",
+    "NEEDS_REVIEW",
+    "verified_pending",
+]
 
 
 @router.get("/act/{act_id}", response_model=RelationshipListResponse)
 def act_relationships(
     act_id: str,
     relationship_type: RelationshipType | None = None,
-    verification_status: VerificationStatus | None = None,
+    verification_status: VerificationStatusFilter | None = None,
     mapped_status: MappedFilter | None = None,
     direction: DirectionFilter = "all",
     limit: int = Query(default=50, ge=1, le=100),
@@ -55,7 +62,7 @@ def act_relationships(
 def section_relationships(
     section_id: str,
     relationship_type: RelationshipType | None = None,
-    verification_status: VerificationStatus | None = None,
+    verification_status: VerificationStatusFilter | None = None,
     mapped_status: MappedFilter | None = None,
     direction: DirectionFilter = "all",
     limit: int = Query(default=50, ge=1, le=100),
@@ -81,7 +88,7 @@ def relationship_graph(
     act_id: str | None = None,
     section_id: str | None = None,
     relationship_type: RelationshipType | None = None,
-    verification_status: VerificationStatus | None = None,
+    verification_status: VerificationStatusFilter | None = None,
     mapped_status: MappedFilter | None = None,
     direction: DirectionFilter = "all",
     depth: int = Query(default=1, ge=1, le=2),
@@ -132,8 +139,6 @@ def relationship_graph(
                 status=reference.verification_status.value,
             )
         )
-        if len(edges) >= 100:
-            break
     return RelationshipGraphResponse(
         depth=depth,
         nodes=list(nodes.values()),
@@ -151,7 +156,7 @@ def _relationships_for_scope(
     scope_id: str,
     direction: DirectionFilter,
     relationship_type: RelationshipType | None,
-    verification_status: VerificationStatus | None,
+    verification_status: VerificationStatusFilter | None,
     mapped_status: MappedFilter | None,
 ) -> list[LegalReference]:
     query = _visible_reference_query(db, current_user)
@@ -171,8 +176,7 @@ def _relationships_for_scope(
 
     if relationship_type:
         query = query.filter(LegalReference.relationship_type == relationship_type)
-    if verification_status:
-        query = query.filter(LegalReference.verification_status == verification_status)
+    query = _filter_verification_status(query, verification_status)
     if mapped_status == "mapped":
         query = query.filter(
             or_(
@@ -186,6 +190,24 @@ def _relationships_for_scope(
             LegalReference.target_section_id.is_(None),
         )
     return query.order_by(LegalReference.created_at.desc()).all()
+
+
+def _filter_verification_status(query, verification_status: VerificationStatusFilter | None):
+    if not verification_status:
+        return query
+    if verification_status == "verified_pending":
+        return query.filter(
+            LegalReference.verification_status.in_(
+                (
+                    VerificationStatus.VERIFIED,
+                    VerificationStatus.PENDING,
+                    VerificationStatus.NEEDS_REVIEW,
+                )
+            )
+        )
+    return query.filter(
+        LegalReference.verification_status == VerificationStatus(verification_status)
+    )
 
 
 def _visible_reference_query(db: Session, current_user: User):

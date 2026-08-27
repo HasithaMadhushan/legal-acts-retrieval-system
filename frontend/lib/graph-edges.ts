@@ -29,6 +29,51 @@ export type GraphCitationRow = {
   relationship_type: string;
 };
 
+export type GraphActRow = {
+  id: string;
+  source_act_id: string;
+  source_act_title: string | null;
+  target_act_id: string | null;
+  target_act_title: string | null;
+  relationship_type: string;
+  verification_status: string;
+  mapped: boolean;
+};
+
+export type GraphModel = {
+  nodes: { id: string; label: string; type: "ACT" }[];
+  edges: GraphEdgeInput[];
+};
+
+export function graphModelFromRows(rows: readonly GraphActRow[]): GraphModel {
+  const nodes = new Map<string, { id: string; label: string; type: "ACT" }>();
+  const edges: GraphEdgeInput[] = [];
+  for (const row of rows) {
+    if (!row.mapped || !row.target_act_id || row.source_act_id === row.target_act_id) {
+      continue;
+    }
+    rememberActNode(nodes, row.source_act_id, row.source_act_title);
+    rememberActNode(nodes, row.target_act_id, row.target_act_title);
+    edges.push({
+      id: row.id,
+      source: row.source_act_id,
+      target: row.target_act_id,
+      label: row.relationship_type,
+      status: row.verification_status
+    });
+  }
+  return { nodes: [...nodes.values()], edges };
+}
+
+function rememberActNode(
+  nodes: Map<string, { id: string; label: string; type: "ACT" }>,
+  id: string,
+  title: string | null
+) {
+  if (nodes.has(id)) return;
+  nodes.set(id, { id, label: title || id, type: "ACT" });
+}
+
 export function graphEdgeKey(edge: Pick<AggregatedGraphEdge, "source" | "target" | "label">) {
   return `${edge.source}|${edge.target}|${edge.label}`;
 }

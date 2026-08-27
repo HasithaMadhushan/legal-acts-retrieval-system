@@ -15,6 +15,11 @@ SCHEDULE_RE = re.compile(
     re.I,
 )
 PART_RE = re.compile(r"\bPart\s+(?P<part>[IVXLCDM]+[A-Z]?)\b", re.I)
+CITED_ACT_NAME_RE = re.compile(
+    r"\b([A-Z][A-Za-z0-9'’]*(?:\s+(?:and|of|the|for|&|[A-Z][A-Za-z0-9'’-]*)){0,5})"
+    r"\s+(Act|Ordinance)\b"
+)
+WEAK_ACT_TITLES = frozenset({"fund act", "trust act", "the code", "code"})
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,26 @@ class ActCitation:
     number: str | None = None
     year: int | None = None
     title: str | None = None
+
+
+def extract_cited_act_title(value: str | None) -> str | None:
+    """Pull a short Act/Ordinance name out of a noisy citation snippet."""
+    if not value:
+        return None
+    padded = re.sub(r"([a-z])(Act|Ordinance)\b", r"\1 \2", value)
+    best: str | None = None
+    for match in CITED_ACT_NAME_RE.finditer(padded):
+        name = _tidy_cited_act_title(f"{match.group(1)} {match.group(2)}")
+        if len(name) < 5 or name.lower() in WEAK_ACT_TITLES:
+            continue
+        if best is None or len(name) > len(best):
+            best = name
+    return best
+
+
+def _tidy_cited_act_title(name: str) -> str:
+    stripped = re.sub(r"^(?:The|And|Of)\s+", "", name, flags=re.I)
+    return collapse_whitespace(stripped)
 
 
 def normalize_act_title(title: str | None) -> str:

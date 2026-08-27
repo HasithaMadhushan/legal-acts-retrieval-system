@@ -9,6 +9,7 @@ from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
 from app.services.reference_normalizer import (
+    extract_cited_act_title,
     normalize_act_number,
     normalize_act_title,
     normalize_chapter_reference,
@@ -16,7 +17,10 @@ from app.services.reference_normalizer import (
     normalize_schedule_reference,
     normalize_section_reference,
     normalize_target_path,
+    parse_act_citation,
 )
+
+_LOCKED_VERIFICATION_STATUSES = {VerificationStatus.VERIFIED, VerificationStatus.REJECTED}
 
 
 @dataclass
@@ -133,6 +137,37 @@ def map_reference_with_result(
     )
 
 
+def remap_unverified_references(db: Session, source_act: LegalAct) -> dict[str, object]:
+    """Re-run mapping for unverified references, leaving Admin decisions intact.
+
+    VERIFIED and REJECTED rows are not rewritten. They still contribute
+    principal-enactment context for later unverified citations in document order.
+    """
+    context = MappingContext(source_act=source_act)
+    results: list[MappingResult] = []
+    skipped_locked_count = 0
+    for reference in _references_in_document_order(db, source_act.id):
+        if reference.verification_status in _LOCKED_VERIFICATION_STATUSES:
+            skipped_locked_count += 1
+            _advance_principal_context(
+                context,
+                reference,
+                mapped_act=_act_for_id(db, reference.target_act_id),
+            )
+            continue
+        result = map_reference_with_result(db, reference, context)
+        results.append(result)
+        _advance_principal_context(
+            context,
+            reference,
+            mapped_act=result.resolved_act,
+            used_principal_context=result.used_principal_context,
+        )
+    summary = summarize_mapping(results)
+    summary["skipped_locked_count"] = skipped_locked_count
+    return summary
+
+
 def summarize_mapping(results: list[MappingResult]) -> dict[str, object]:
     warnings: list[str] = []
     for result in results:
@@ -171,9 +206,23 @@ def _normalize_reference_fields(reference: LegalReference) -> None:
     reference.relationship_type = (
         normalize_relationship_type(reference.relationship_type) or RelationshipType.UNKNOWN
     )
+    _fill_missing_act_number_and_year(reference)
     reference.target_act_number = normalize_act_number(reference.target_act_number)
     reference.target_section_number = normalize_section_reference(reference.target_section_number)
     reference.target_section_path = normalize_target_path(reference.target_section_path)
+
+
+def _fill_missing_act_number_and_year(reference: LegalReference) -> None:
+    if reference.target_act_number and reference.target_act_year:
+        return
+    for source in (reference.target_act_title_raw, reference.raw_reference_text):
+        citation = parse_act_citation(source)
+        if not reference.target_act_number and citation.number:
+            reference.target_act_number = citation.number
+        if not reference.target_act_year and citation.year:
+            reference.target_act_year = citation.year
+        if reference.target_act_number and reference.target_act_year:
+            return
 
 
 def _find_target_act(
@@ -200,53 +249,103 @@ def _find_target_act(
             warnings=["Principal enactment context was used for a section or schedule reference."],
         )
 
-    if reference.target_act_number and reference.target_act_year:
-        act = (
-            db.query(LegalAct)
-            .filter(
-                LegalAct.act_number == reference.target_act_number,
-                LegalAct.year == reference.target_act_year,
-            )
-            .first()
+    numbered = _match_act_by_number_and_year(db, reference)
+    if numbered is not None:
+        return numbered
+
+    titled = _match_act_by_citation_titles(db, reference)
+    if titled is not None:
+        return titled
+
+    return _match_act_by_chapter(db, reference) or _TargetActResult()
+
+
+def _match_act_by_number_and_year(
+    db: Session, reference: LegalReference
+) -> _TargetActResult | None:
+    if not (reference.target_act_number and reference.target_act_year):
+        return None
+    act = (
+        db.query(LegalAct)
+        .filter(
+            LegalAct.act_number == reference.target_act_number,
+            LegalAct.year == reference.target_act_year,
         )
-        if act:
-            return _TargetActResult(act=act, match_kind="exact")
+        .first()
+    )
+    if act:
+        return _TargetActResult(act=act, match_kind="exact")
+    return _TargetActResult(
+        warnings=["Cited Act number and year do not match an uploaded Act."]
+    )
 
-    normalized_title = normalize_act_title(reference.target_act_title_raw)
-    if normalized_title:
-        exact = db.query(LegalAct).filter(LegalAct.normalized_title == normalized_title).first()
-        if exact:
-            return _TargetActResult(act=exact, match_kind="exact")
-        if len(normalized_title) >= 4:
-            candidates = (
-                db.query(LegalAct)
-                .filter(LegalAct.normalized_title.ilike(f"%{normalized_title}%"))
-                .all()
-            )
-            ranked = _rank_partial_title_candidates(normalized_title, candidates)
-            if ranked:
-                return ranked
 
+def _match_act_by_citation_titles(
+    db: Session, reference: LegalReference
+) -> _TargetActResult | None:
+    for title in _citation_title_candidates(reference):
+        matched = _match_act_by_title(db, title)
+        if matched is not None:
+            return matched
+    return None
+
+
+def _citation_title_candidates(reference: LegalReference) -> list[str]:
+    seen: set[str] = set()
+    candidates: list[str] = []
+    for raw in (
+        extract_cited_act_title(reference.target_act_title_raw),
+        extract_cited_act_title(reference.raw_reference_text),
+        reference.target_act_title_raw,
+    ):
+        if not raw:
+            continue
+        key = normalize_act_title(raw)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        candidates.append(raw)
+    return candidates
+
+
+def _match_act_by_title(db: Session, title: str) -> _TargetActResult | None:
+    normalized_title = normalize_act_title(title)
+    if not normalized_title:
+        return None
+    exact = db.query(LegalAct).filter(LegalAct.normalized_title == normalized_title).first()
+    if exact:
+        return _TargetActResult(act=exact, match_kind="exact")
+    if len(normalized_title) < 4:
+        return None
+    candidates = (
+        db.query(LegalAct)
+        .filter(LegalAct.normalized_title.ilike(f"%{normalized_title}%"))
+        .all()
+    )
+    return _rank_partial_title_candidates(normalized_title, candidates)
+
+
+def _match_act_by_chapter(db: Session, reference: LegalReference) -> _TargetActResult | None:
     chapter = normalize_chapter_reference(
         reference.target_act_title_raw
     ) or normalize_chapter_reference(reference.target_section_path)
-    if chapter:
-        normalized_chapter = normalize_act_title(chapter)
-        chapter_match = (
-            db.query(LegalAct)
-            .filter(
-                or_(
-                    LegalAct.normalized_title.ilike(f"%{normalized_chapter}%"),
-                    LegalAct.source_name.ilike(f"%{chapter}%"),
-                    LegalAct.source_url.ilike(f"%{chapter}%"),
-                )
+    if not chapter:
+        return None
+    normalized_chapter = normalize_act_title(chapter)
+    chapter_match = (
+        db.query(LegalAct)
+        .filter(
+            or_(
+                LegalAct.normalized_title.ilike(f"%{normalized_chapter}%"),
+                LegalAct.source_name.ilike(f"%{chapter}%"),
+                LegalAct.source_url.ilike(f"%{chapter}%"),
             )
-            .first()
         )
-        if chapter_match:
-            return _TargetActResult(act=chapter_match, match_kind="partial")
-
-    return _TargetActResult()
+        .first()
+    )
+    if chapter_match:
+        return _TargetActResult(act=chapter_match, match_kind="partial")
+    return None
 
 
 # Minimum similarity for a fuzzy title match to be trusted at all, and minimum lead
@@ -374,6 +473,37 @@ def _has_structured_target(reference: LegalReference) -> bool:
         or reference.target_section_number
         or reference.target_section_path
     )
+
+
+def _references_in_document_order(db: Session, source_act_id: str) -> list[LegalReference]:
+    return (
+        db.query(LegalReference)
+        .outerjoin(ActSection, LegalReference.source_section_id == ActSection.id)
+        .filter(LegalReference.source_act_id == source_act_id)
+        .order_by(ActSection.sort_order.asc(), LegalReference.created_at.asc())
+        .all()
+    )
+
+
+def _act_for_id(db: Session, act_id: str | None) -> LegalAct | None:
+    if not act_id:
+        return None
+    return db.get(LegalAct, act_id)
+
+
+def _advance_principal_context(
+    context: MappingContext,
+    reference: LegalReference,
+    *,
+    mapped_act: LegalAct | None,
+    used_principal_context: bool = False,
+) -> None:
+    if mapped_act is None or used_principal_context:
+        return
+    if _is_principal_enactment(reference.target_act_title_raw):
+        return
+    context.principal_act = mapped_act
+    context.principal_source = reference.raw_reference_text
 
 
 def _unique_strings(values: list[str]) -> list[str]:

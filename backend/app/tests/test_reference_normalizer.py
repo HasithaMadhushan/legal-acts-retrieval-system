@@ -1,5 +1,6 @@
 from app.core.roles import RelationshipType
 from app.services.reference_normalizer import (
+    extract_cited_act_title,
     normalize_act_number,
     normalize_act_title,
     normalize_chapter_reference,
@@ -45,3 +46,25 @@ def test_normalizes_relationship_aliases():
     assert normalize_relationship_type("amends") == RelationshipType.AMENDS
     assert normalize_relationship_type("cross references") == RelationshipType.CROSS_REFERENCE
     assert normalize_relationship_type("addition") == RelationshipType.ADDS
+
+
+def test_extracts_cited_act_title_from_definition_sentence():
+    assert (
+        extract_cited_act_title("means a director as defined in the Inland Revenue Act")
+        == "Inland Revenue Act"
+    )
+
+
+def test_extracts_longest_cited_act_or_ordinance_name():
+    assert (
+        extract_cited_act_title(
+            "as defined in the Value Added Tax Act and the Poisons Ordinance"
+        )
+        == "Value Added Tax Act"
+    )
+
+
+def test_extract_cited_act_title_skips_weak_and_internal_labels():
+    assert extract_cited_act_title("paid into the Fund Act") is None
+    assert extract_cited_act_title("section 22 of this Act") is None
+    assert extract_cited_act_title(None) is None

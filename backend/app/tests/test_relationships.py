@@ -206,6 +206,27 @@ def test_admin_sees_pending_rejected_and_unresolved(client, admin_token):
     assert {"PENDING", "REJECTED", "NEEDS_REVIEW", "VERIFIED"}.issubset(statuses)
 
 
+def test_verified_pending_filter_excludes_rejected_relationships(client, lawyer_token):
+    ids = _create_relationship_fixture()
+
+    response = client.get(
+        f"/api/v1/relationships/act/{ids['source_act_id']}",
+        headers={"Authorization": f"Bearer {lawyer_token}"},
+        params={"verification_status": "verified_pending"},
+    )
+
+    assert response.status_code == 200
+    rows = response.json()["relationships"]
+    statuses = {row["verification_status"] for row in rows}
+    ids_returned = {row["id"] for row in rows}
+    assert ids["rejected_id"] not in ids_returned
+    assert ids["outgoing_id"] in ids_returned
+    assert ids["pending_id"] in ids_returned
+    assert ids["unresolved_id"] in ids_returned
+    assert "REJECTED" not in statuses
+    assert {"VERIFIED", "PENDING", "NEEDS_REVIEW"}.issubset(statuses)
+
+
 def test_general_user_only_sees_verified_relationships(client, user_token):
     ids = _create_relationship_fixture()
 
@@ -350,3 +371,38 @@ def test_relationship_graph_edges_are_not_starved_by_newer_unresolved_rows(
         ids["outgoing_id"],
         ids["incoming_id"],
     }
+
+
+def test_relationship_graph_returns_every_mapped_cross_act_edge(client, admin_token):
+    ids = _create_relationship_fixture()
+    with SessionLocal() as db:
+        extras = [
+            LegalReference(
+                source_act_id=ids["source_act_id"],
+                source_section_id=ids["source_section_id"],
+                raw_reference_text=f"Refers to target {index}",
+                context_snippet=f"Refers to target context {index}.",
+                relationship_type=RelationshipType.REFERS_TO,
+                target_act_id=ids["target_act_id"],
+                target_section_id=ids["target_section_id"],
+                confidence_score=0.9,
+                verification_status=VerificationStatus.VERIFIED,
+            )
+            for index in range(100)
+        ]
+        db.add_all(extras)
+        db.commit()
+        extra_ids = {reference.id for reference in extras}
+
+    response = client.get(
+        "/api/v1/relationships/graph",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        params={"act_id": ids["source_act_id"]},
+    )
+
+    assert response.status_code == 200
+    edge_ids = {edge["id"] for edge in response.json()["edges"]}
+    assert extra_ids.issubset(edge_ids)
+    assert ids["outgoing_id"] in edge_ids
+    assert ids["incoming_id"] in edge_ids
+    assert len(edge_ids) == 102

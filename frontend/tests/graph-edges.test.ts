@@ -3,9 +3,11 @@ import {
   aggregateGraphEdges,
   displayEdgeLabel,
   edgeStrokeWidth,
+  graphModelFromRows,
   neighborCount,
   rowsMatchingGraphSelection,
-  withPairOffsets
+  withPairOffsets,
+  type GraphActRow
 } from "../lib/graph-edges";
 
 const vatToGst = {
@@ -144,5 +146,57 @@ describe("rowsMatchingGraphSelection", () => {
       "2",
       "3"
     ]);
+  });
+});
+
+describe("graphModelFromRows", () => {
+  it("turns every mapped cross-Act citation into a graph edge, including past the old 100-row cap", () => {
+    const rows: GraphActRow[] = Array.from({ length: 120 }, (_, index) => ({
+      id: `cite-${index}`,
+      source_act_id: "vat",
+      source_act_title: "Value Added Tax Act",
+      target_act_id: "gst",
+      target_act_title: "Goods and Services Tax Act",
+      relationship_type: "REFERS_TO",
+      verification_status: index === 0 ? "PENDING" : "VERIFIED",
+      mapped: true
+    }));
+    rows.push({
+      id: "self",
+      source_act_id: "vat",
+      source_act_title: "Value Added Tax Act",
+      target_act_id: "vat",
+      target_act_title: "Value Added Tax Act",
+      relationship_type: "REFERS_TO",
+      verification_status: "VERIFIED",
+      mapped: true
+    });
+    rows.push({
+      id: "unresolved",
+      source_act_id: "vat",
+      source_act_title: "Value Added Tax Act",
+      target_act_id: null,
+      target_act_title: null,
+      relationship_type: "REFERS_TO",
+      verification_status: "NEEDS_REVIEW",
+      mapped: false
+    });
+
+    const model = graphModelFromRows(rows);
+    const aggregated = aggregateGraphEdges(model.edges);
+
+    expect(model.edges).toHaveLength(120);
+    expect(aggregated).toEqual([
+      {
+        key: "vat|gst|REFERS_TO",
+        source: "vat",
+        target: "gst",
+        label: "REFERS_TO",
+        count: 120,
+        pending: true,
+        memberIds: rows.slice(0, 120).map((row) => row.id)
+      }
+    ]);
+    expect(model.nodes.map((node) => node.id).sort()).toEqual(["gst", "vat"]);
   });
 });

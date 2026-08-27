@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import delete, or_
+from sqlalchemy import delete, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,10 +21,12 @@ from app.models.reading_history import ReadingHistoryItem
 from app.models.saved_item import SavedItem
 from app.models.user import User
 from app.schemas.legal_act import (
+    ActReviewQueueItem,
     LegalActBrowseRead,
     LegalActDetail,
     LegalActRead,
     LegalActUpdate,
+    MappingRemapRead,
     ProcessingJobRead,
     VerificationSummaryRead,
 )
@@ -33,6 +35,7 @@ from app.services.extraction_artifact import (
     collect_artifact_pointers,
     load_extraction_artifact_view,
 )
+from app.services.reference_mapper import remap_unverified_references
 from app.services.storage import get_storage
 from app.services.text_cleaner import normalize_for_search
 
@@ -92,6 +95,49 @@ def list_acts(
             )
         )
     return query.order_by(LegalAct.uploaded_at.desc()).all()
+
+
+@router.get("/review-queue", response_model=list[ActReviewQueueItem])
+def list_reference_review_queue(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[ActReviewQueueItem]:
+    counts = (
+        db.query(LegalReference.source_act_id, func.count())
+        .filter(LegalReference.verification_status == VerificationStatus.NEEDS_REVIEW)
+        .group_by(LegalReference.source_act_id)
+        .all()
+    )
+    if not counts:
+        return []
+    by_act = {act_id: count for act_id, count in counts}
+    unresolved_rows = (
+        db.query(LegalReference.source_act_id, func.count())
+        .filter(
+            LegalReference.source_act_id.in_(by_act.keys()),
+            LegalReference.target_act_id.is_(None),
+            LegalReference.target_section_id.is_(None),
+        )
+        .group_by(LegalReference.source_act_id)
+        .all()
+    )
+    unresolved = {act_id: count for act_id, count in unresolved_rows}
+    acts = db.query(LegalAct).filter(LegalAct.id.in_(by_act.keys())).all()
+    items = [
+        ActReviewQueueItem(
+            act_id=act.id,
+            title=act.title,
+            act_number=act.act_number,
+            year=act.year,
+            needs_review_references=by_act[act.id],
+            unresolved_references=unresolved.get(act.id, 0),
+        )
+        for act in acts
+    ]
+    items.sort(
+        key=lambda item: (-item.needs_review_references, item.title)
+    )
+    return items
 
 
 def _browse_entry(db: Session, act: LegalAct) -> LegalActBrowseRead:
@@ -319,6 +365,24 @@ def process_uploaded_act(
     job = create_processing_job(db, act, current_user)
     background_tasks.add_task(run_processing_job, job.id)
     return job
+
+
+@router.post(
+    "/{act_id}/remap-references",
+    response_model=MappingRemapRead,
+    responses={404: {"description": "Act not found."}},
+)
+def remap_act_references(
+    act_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> MappingRemapRead:
+    act = db.get(LegalAct, act_id)
+    if not act:
+        raise HTTPException(status_code=404, detail="Act not found.")
+    summary = remap_unverified_references(db, act)
+    db.commit()
+    return MappingRemapRead.model_validate(summary)
 
 
 @router.get("/{act_id}/processing-jobs", response_model=list[ProcessingJobRead])
