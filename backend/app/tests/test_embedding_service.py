@@ -1,3 +1,4 @@
+import hashlib
 import math
 from types import SimpleNamespace
 
@@ -39,6 +40,19 @@ class _WhitespaceTokenizer:
         if truncation and max_length is not None:
             tokens = tokens[:max_length]
         return {"input_ids": tokens}
+
+    def decode(self, ids, skip_special_tokens=True):
+        return " ".join(ids)
+
+
+class _PrefixingTokenizer:
+    """Each encode/decode round-trip prepends a marker, so truncation is not idempotent."""
+
+    def __call__(self, text, truncation=True, max_length=None, add_special_tokens=False):
+        tokens = text.split()
+        if truncation and max_length is not None:
+            tokens = tokens[:max_length]
+        return {"input_ids": ["<t>"] + tokens}
 
     def decode(self, ids, skip_special_tokens=True):
         return " ".join(ids)
@@ -376,10 +390,21 @@ def test_embed_sections_writes_ready_metadata_and_skips_current_embeddings():
     assert already_ready.embedding == [0.25] * 8
 
 
-def test_embed_sections_marks_failed_without_storing_legal_text_on_provider_error():
+def test_embed_sections_marks_failed_without_storing_legal_text_on_provider_error(
+    monkeypatch,
+):
     legal_text = "Secret exclusive original jurisdiction clause."
     section = _section(text=legal_text)
     service = EmbeddingService(provider=_ExplodingProvider())
+    warnings: list[dict[str, object]] = []
+
+    def capture_warning(event: str, **kwargs: object) -> None:
+        warnings.append({"event": event, **kwargs})
+
+    monkeypatch.setattr(
+        "app.services.embedding_service.logger.warning",
+        capture_warning,
+    )
 
     with pytest.raises(EmbeddingError):
         service.embed_sections([section])
@@ -388,6 +413,13 @@ def test_embed_sections_marks_failed_without_storing_legal_text_on_provider_erro
     assert section.embedding_error is not None
     assert legal_text not in section.embedding_error
     assert section.text == legal_text
+    assert warnings == [
+        {
+            "event": "section_embedding_failed",
+            "section_id": "section-1",
+            "error_type": "RuntimeError",
+        }
+    ]
 
 
 def test_tokenizer_truncation_uses_tokens_not_character_count():
@@ -425,6 +457,77 @@ def test_truncated_section_text_is_what_gets_hashed_and_embedded():
     assert service.truncate_text(service.build_section_text(act, short_tail)) == (
         "Act Section 1 alpha"
     )
+
+
+def _prefixing_sentence_transformer_provider(
+    monkeypatch,
+) -> tuple[SentenceTransformerProvider, _RecordingModel]:
+    model = _RecordingModel(dimension=8, max_seq_length=4)
+    model.tokenizer = _PrefixingTokenizer()
+
+    def fake_load(model_name: str, revision: str, device: str):
+        return model
+
+    monkeypatch.setattr(
+        "app.services.embedding_providers.load_sentence_transformer",
+        fake_load,
+    )
+    provider = SentenceTransformerProvider(
+        model_name="test-model",
+        dimension=8,
+        revision="main",
+        device="cpu",
+        batch_size=8,
+    )
+    return provider, model
+
+
+def test_source_hash_matches_the_truncated_string_that_is_embedded(monkeypatch):
+    provider, model = _prefixing_sentence_transformer_provider(monkeypatch)
+    service = EmbeddingService(provider=provider)
+    act = _act(title="Act", act_number=None, year=None, category=None)
+    section = _section(
+        act=act,
+        section_number="1",
+        section_path="1",
+        heading=None,
+        text="alpha beta gamma delta epsilon zeta",
+    )
+    truncated_once = provider.truncate_text(service.build_section_text(act, section))
+
+    service.embed_sections([section])
+
+    assert truncated_once == "<t> Act Section 1 alpha"
+    assert section.embedding_source_hash == hashlib.sha256(
+        truncated_once.encode("utf-8")
+    ).hexdigest()
+    assert model.encode_calls[0]["texts"] == [truncated_once]
+
+
+def test_embed_does_not_apply_a_second_truncation_before_encode(monkeypatch):
+    provider, model = _prefixing_sentence_transformer_provider(monkeypatch)
+    service = EmbeddingService(provider=provider)
+    query = "alpha beta gamma delta epsilon zeta"
+    truncated_once = provider.truncate_text(query)
+    truncated_twice = provider.truncate_text(truncated_once)
+
+    service.embed_query(query)
+
+    assert truncated_once == "<t> alpha beta gamma delta"
+    assert truncated_twice == "<t> <t> alpha beta gamma"
+    assert truncated_once != truncated_twice
+    assert model.encode_calls[0]["texts"] == [truncated_once]
+    assert truncated_twice not in model.encode_calls[0]["texts"]
+
+
+def test_deterministic_provider_encodes_caller_text_without_truncating():
+    provider = DeterministicTestProvider(dimension=8, max_seq_length=2)
+    long_text = "alpha beta gamma delta"
+    truncated = provider.truncate_text(long_text)
+
+    assert truncated == "alpha beta"
+    assert provider.embed_query(long_text) != provider.embed_query(truncated)
+    assert provider.embed_documents([long_text])[0] == provider.embed_query(long_text)
 
 
 def test_embed_text_uses_configured_test_provider_path():

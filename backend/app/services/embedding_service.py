@@ -179,15 +179,16 @@ class EmbeddingService:
             validated = [
                 _validated_vector(vector, self._provider.dimension) for vector in vectors
             ]
-        except EmbeddingError:
-            self._mark_failed(batch)
+        except EmbeddingError as exc:
+            self._mark_failed(batch, exc)
             raise
         except Exception as exc:
-            self._mark_failed(batch)
+            self._mark_failed(batch, exc)
             raise EmbeddingError(_PROVIDER_FAILED) from exc
         if len(validated) != len(batch):
-            self._mark_failed(batch)
-            raise EmbeddingError(_PROVIDER_FAILED)
+            mismatch = EmbeddingError(_PROVIDER_FAILED)
+            self._mark_failed(batch, mismatch)
+            raise mismatch
         for section, truncated, vector in zip(batch, texts, validated, strict=True):
             self._apply_ready(section, truncated, vector)
         return len(batch)
@@ -202,14 +203,15 @@ class EmbeddingService:
         section.embedded_at = utc_now()
         section.embedding_error = None
 
-    def _mark_failed(self, sections: list[object]) -> None:
+    def _mark_failed(self, sections: list[object], exc: BaseException) -> None:
+        error_type = type(exc).__name__
         for section in sections:
             section.embedding_status = EmbeddingStatus.FAILED
             section.embedding_error = _PROVIDER_FAILED
             logger.warning(
                 "section_embedding_failed",
                 section_id=getattr(section, "id", None),
-                error_type="EmbeddingError",
+                error_type=error_type,
             )
 
 

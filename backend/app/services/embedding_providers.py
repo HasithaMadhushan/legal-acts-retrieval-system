@@ -15,10 +15,13 @@ _shared_model_key: tuple[str, str, str] | None = None
 
 
 class EmbeddingProvider(Protocol):
+    """Callers truncate once via ``truncate_text``, then ``embed_*`` encodes as-is."""
+
     provider_name: str
     model_name: str
     dimension: int
 
+    def truncate_text(self, text: str) -> str: ...
     def embed_query(self, text: str) -> list[float]: ...
     def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
 
@@ -96,7 +99,7 @@ class DeterministicTestProvider:
         return _truncate_whitespace(text, self.max_seq_length)
 
     def embed_query(self, text: str) -> list[float]:
-        return _hash_vector(self.truncate_text(text), self.dimension)
+        return _hash_vector(text, self.dimension)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self.embed_query(text) for text in texts]
@@ -152,9 +155,8 @@ class SentenceTransformerProvider:
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        truncated = [self.truncate_text(text) for text in texts]
         encoded = self._get_model().encode(
-            truncated,
+            texts,
             normalize_embeddings=True,
             batch_size=self._batch_size,
         )
