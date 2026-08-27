@@ -2,15 +2,18 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.core.roles import EmbeddingStatus, ProcessingStatus
-from app.db.types import SECTION_EMBEDDING_DIMENSION
 from app.db.session import SessionLocal
+from app.db.types import SECTION_EMBEDDING_DIMENSION
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.services.text_cleaner import normalize_for_search
 
 
 def _sample_embedding() -> list[float]:
-    return [float(index) / SECTION_EMBEDDING_DIMENSION for index in range(SECTION_EMBEDDING_DIMENSION)]
+    return [
+        float(index) / SECTION_EMBEDDING_DIMENSION
+        for index in range(SECTION_EMBEDDING_DIMENSION)
+    ]
 
 
 def test_act_section_embedding_round_trips_on_sqlite():
