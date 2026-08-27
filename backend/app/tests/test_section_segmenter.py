@@ -10,6 +10,25 @@ def _main_sections(text: str):
     ]
 
 
+def test_table_of_contents_rows_remain_separate_from_operative_sections():
+    text = """CONTENTS
+1. Short title.
+2. Duties.
+
+1. Short title.
+This Act may be cited as the Example Act.
+
+2. Duties.
+The Minister may make regulations.
+"""
+    sections = _main_sections(text)
+
+    assert [section.section_number for section in sections] == ["1", "2", "1", "2"]
+    assert "This Act may be cited as the Example Act." in sections[2].text
+    assert "The Minister may make regulations." in sections[3].text
+    assert "This Act may be cited" not in sections[0].text
+
+
 def test_segment_main_sections_with_headings_without_losing_text():
     text = """AN EXAMPLE ACT
 No. 12 of 2020

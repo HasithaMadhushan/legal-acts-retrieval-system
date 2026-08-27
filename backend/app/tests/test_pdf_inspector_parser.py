@@ -21,6 +21,26 @@ class NativePdfInspectorClient:
         )
 
 
+class MixedNativeAndOcrInspectorClient:
+    def process_pdf(self, file_path: str):
+        return SimpleNamespace(
+            page_count=2,
+            pages_needing_ocr=[2],
+            has_encoding_issues=False,
+        )
+
+    def process_pdf_with_ocr(self, file_path: str, **options):
+        return SimpleNamespace(
+            page_count=2,
+            pages_routed_to_ocr=[2],
+            pages_recommending_hosted=[],
+            pages=[
+                SimpleNamespace(page_number=1, markdown="**1.** Short title.\nLegal text."),
+                SimpleNamespace(page_number=2, markdown="**2.** Duties.\nMore legal text."),
+            ],
+        )
+
+
 class ScannedPdfInspectorClient:
     def process_pdf(self, file_path: str):
         return SimpleNamespace(
@@ -52,6 +72,10 @@ def test_native_pdf_inspector_output_is_page_preserving_legal_plain_text(tmp_pat
         "1. Short title.\nLegal text.",
         "2. Duties.\nMore legal text.",
     ]
+    assert parsed.structured_document is not None
+    assert parsed.structured_document.markdown is not None
+    assert "**1.**" in parsed.structured_document.markdown
+    assert "**1.**" not in parsed.full_text
     assert segment_act_text(parsed.full_text).summary["sections_detected"] == 2
 
 
@@ -68,3 +92,24 @@ def test_scanned_pdf_uses_preinstalled_offline_ocr_and_returns_legal_text(tmp_pa
     assert parsed.parser_name == "PDF_INSPECTOR"
     assert segment_act_text(parsed.full_text).summary["sections_detected"] == 2
     assert any("2 page(s) were processed with offline OCR" in item for item in parsed.warnings)
+    assert parsed.structured_document is not None
+    assert parsed.structured_document.pages is not None
+    assert [page.extraction_method for page in parsed.structured_document.pages] == ["ocr", "ocr"]
+
+
+def test_mixed_native_and_ocr_pages_keep_per_page_extraction_method(tmp_path):
+    pdf = tmp_path / "mixed.pdf"
+    pdf.write_bytes(b"%PDF-test")
+
+    parsed = PdfInspectorParser(
+        client=MixedNativeAndOcrInspectorClient(),
+        ocr_enabled=True,
+        ocr_model_directory="/opt/pdf-inspector/models",
+    ).extract(str(pdf))
+
+    assert parsed.structured_document is not None
+    assert parsed.structured_document.pages is not None
+    assert [page.extraction_method for page in parsed.structured_document.pages] == [
+        "native",
+        "ocr",
+    ]

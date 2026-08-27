@@ -19,13 +19,18 @@ For the purposes of section 1, this section provides sample text.
 """
 
 
-def _pdf_bytes_with_text(text: str) -> bytes:
+def _pdf_bytes_with_pages(page_texts: list[str]) -> bytes:
     document = fitz.open()
-    page = document.new_page()
-    page.insert_text((72, 72), text, fontsize=11)
+    for text in page_texts:
+        page = document.new_page()
+        page.insert_text((72, 72), text, fontsize=11)
     content = document.tobytes()
     document.close()
     return content
+
+
+def _pdf_bytes_with_text(text: str) -> bytes:
+    return _pdf_bytes_with_pages([text])
 
 
 def _blank_pdf_bytes() -> bytes:
@@ -170,6 +175,53 @@ def test_image_only_pdf_is_marked_ocr_required(client, admin_token):
     assert summary["extracted_character_count"] == 0
     assert any("did not produce text" in warning for warning in summary["warnings"])
     assert any("native/OCR routes" in warning for warning in summary["warnings"])
+    assert all("OCR extraction was attempted" not in warning for warning in summary["warnings"])
+
+
+def test_multi_page_act_records_section_page_numbers(client, admin_token):
+    act = _upload_pdf(
+        client,
+        admin_token,
+        _pdf_bytes_with_pages(
+            [
+                "1. Short title.\nThis Act may be cited as the Example Act.",
+                "2. Duties.\nThe Minister may make regulations.",
+            ]
+        ),
+    )
+
+    job = _process_and_wait(client, admin_token, act["id"])
+    assert job["status"] == "COMPLETED"
+    assert job["summary_json"]["page_count"] == 2
+
+    response = client.get(
+        f"/api/v1/acts/{act['id']}/sections",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    numbered = {
+        section["section_number"]: section
+        for section in response.json()
+        if section["section_type"] == "SECTION"
+    }
+    assert numbered["1"]["page_start"] == 1
+    assert numbered["1"]["page_end"] == 1
+    assert numbered["2"]["page_start"] == 2
+    assert numbered["2"]["page_end"] == 2
+
+
+def test_unstructured_dense_pdf_records_structural_warning_on_the_job(client, admin_token):
+    unstructured = "Long unstructured extraction without numbered sections. " * 40
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(unstructured))
+
+    job = _process_and_wait(client, admin_token, act["id"])
+    summary = job["summary_json"]
+
+    assert job["status"] == "COMPLETED"
+    assert any(
+        "Native structural validation failed and no fallback passed" in warning
+        for warning in summary["warnings"]
+    )
 
 
 def test_failed_reprocessing_does_not_replace_existing_sections(client, admin_token):

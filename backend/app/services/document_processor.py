@@ -24,6 +24,7 @@ from app.services.pdf_parser.base import PdfExtractionError, PdfParser
 from app.services.pdf_parser.docling_parser import DoclingParser
 from app.services.pdf_parser.native_first_parser import NativeFirstPdfParser
 from app.services.pdf_parser.pdf_inspector_parser import PdfInspectorParser
+from app.services.pdf_parser.preparation import prepare_act_pages
 from app.services.pdf_parser.pymupdf_parser import PyMuPdfParser
 from app.services.pdf_parser.quality_gated_parser import QualityGatedPdfParser
 from app.services.reference_extractor import (
@@ -32,10 +33,10 @@ from app.services.reference_extractor import (
     summarize_references,
 )
 from app.services.reference_mapper import map_references, summarize_mapping
-from app.services.section_segmenter import segment_act_text
+from app.services.section_segmenter import attach_section_pages, segment_act_text
 from app.services.stale_jobs import fail_stale_running_jobs as fail_stale_running_jobs
 from app.services.storage import get_storage
-from app.services.text_cleaner import clean_text, normalize_for_search
+from app.services.text_cleaner import normalize_for_search
 
 logger = get_logger(__name__)
 
@@ -135,9 +136,10 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         local_pdf_path = get_storage().ensure_local_path(act.stored_file_path)
         parsed = parser.extract(str(local_pdf_path))
         raw_text = parsed.full_text
-        cleaned_text = clean_text(raw_text)
+        prepared = prepare_act_pages(parsed)
+        processing_text = prepared.text
         warnings = _unique_strings([*selection_warnings, *parsed.warnings])
-        extracted_character_count = len(cleaned_text)
+        extracted_character_count = len(processing_text)
         summary.update(
             {
                 "parser_used": parsed.parser_name,
@@ -146,7 +148,7 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
                 "warnings": warnings,
             }
         )
-        if not cleaned_text.strip():
+        if not processing_text.strip():
             message = "No extractable text was found after the configured native/OCR routes."
             raise PdfExtractionError(
                 message,
@@ -158,7 +160,7 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
 
         job.current_step = "Extracting metadata"
         job.progress_percent = 40
-        metadata = extract_metadata(cleaned_text, act.source_file_name)
+        metadata = extract_metadata(processing_text, act.source_file_name)
         metadata_summary = _metadata_summary(metadata)
         if previous_processing_status in {ProcessingStatus.PROCESSED, ProcessingStatus.VERIFIED}:
             metadata_summary["preserved_fields"] = _metadata_field_names()
@@ -172,7 +174,8 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
 
         job.current_step = "Segmenting sections"
         job.progress_percent = 60
-        segmentation = segment_act_text(cleaned_text)
+        segmentation = segment_act_text(processing_text)
+        attach_section_pages(segmentation.sections, prepared.page_spans)
         segmentation_summary = segmentation.summary
 
         existing_sections = db.query(ActSection).filter(ActSection.act_id == act.id).all()
@@ -396,27 +399,23 @@ def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:
 
     if requested in {"pdf-inspector", "pdf_inspector"}:
         if settings.pdf_inspector_enabled:
-            docling_fallback = None
-            if settings.docling_enabled:
-                docling_fallback = DoclingParser(
-                    timeout_seconds=settings.docling_timeout_seconds
-                )
             return (
                 QualityGatedPdfParser(
                     PdfInspectorParser(
                         ocr_enabled=settings.ocr_enabled,
                         ocr_model_directory=settings.pdf_inspector_ocr_model_directory,
                     ),
-                    docling_fallback,
+                    _optional_docling(settings),
                     PyMuPdfParser(),
                 ),
                 requested,
                 warnings,
             )
         warnings.append(
-            "PDF Inspector was requested, but PDF_INSPECTOR_ENABLED=false; PyMuPDF was used."
+            "PDF Inspector was requested, but PDF_INSPECTOR_ENABLED=false; "
+            "falling back to the native-first route."
         )
-        return PyMuPdfParser(), requested, warnings
+        return _native_first_route(settings, inspector=None), requested, warnings
 
     if requested == "docling":
         if settings.docling_enabled:
@@ -425,35 +424,68 @@ def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:
                 requested,
                 warnings,
             )
-        warnings.append("Docling was requested, but DOCLING_ENABLED=false; PyMuPDF was used.")
-        return PyMuPdfParser(), requested, warnings
+        warnings.append(
+            "Docling was requested, but DOCLING_ENABLED=false; "
+            "falling back to the native-first route."
+        )
+        return _native_first_route(
+            settings, inspector=_configured_inspector(settings)
+        ), requested, warnings
 
     if requested == "ocr":
-        warnings.append("OCR parsing is not enabled for this MVP; PyMuPDF was used.")
-        return PyMuPdfParser(), requested, warnings
+        warnings.append(_ocr_primary_warning(settings))
+        return _native_first_route(
+            settings, inspector=_configured_inspector(settings)
+        ), requested, warnings
 
     if requested not in {"", "pymupdf"}:
-        warnings.append(f"Unknown DOC_PARSER_PRIMARY={requested!r}; PyMuPDF was used.")
-        return PyMuPdfParser(), requested, warnings
+        warnings.append(
+            f"Unknown DOC_PARSER_PRIMARY={requested!r}; falling back to the native-first route."
+        )
+        return _native_first_route(
+            settings, inspector=_configured_inspector(settings)
+        ), requested, warnings
 
-    native = PyMuPdfParser()
-    if not settings.pdf_inspector_enabled:
-        return native, requested or "pymupdf", warnings
-    docling_fallback = None
-    if settings.docling_enabled:
-        docling_fallback = DoclingParser(timeout_seconds=settings.docling_timeout_seconds)
     return (
-        NativeFirstPdfParser(
-            native,
-            PdfInspectorParser(
-                ocr_enabled=settings.ocr_enabled,
-                ocr_model_directory=settings.pdf_inspector_ocr_model_directory,
-            ),
-            docling_fallback,
-        ),
+        _native_first_route(settings, inspector=_configured_inspector(settings)),
         requested or "pymupdf",
         warnings,
     )
+
+
+def _ocr_primary_warning(settings) -> str:
+    if settings.pdf_inspector_enabled and settings.ocr_enabled:
+        return (
+            "Direct OCR primary mode is unsupported; "
+            "using native-first with selective OCR fallback."
+        )
+    if settings.ocr_enabled:
+        return (
+            "OCR was requested but is unavailable because PDF Inspector is disabled; "
+            "using the native-first route."
+        )
+    return "OCR was requested but is disabled; using the native-first route."
+
+
+def _optional_docling(settings) -> DoclingParser | None:
+    if not settings.docling_enabled:
+        return None
+    return DoclingParser(timeout_seconds=settings.docling_timeout_seconds)
+
+
+def _configured_inspector(settings) -> PdfInspectorParser | None:
+    if not settings.pdf_inspector_enabled:
+        return None
+    return PdfInspectorParser(
+        ocr_enabled=settings.ocr_enabled,
+        ocr_model_directory=settings.pdf_inspector_ocr_model_directory,
+    )
+
+
+def _native_first_route(
+    settings, *, inspector: PdfInspectorParser | None
+) -> NativeFirstPdfParser:
+    return NativeFirstPdfParser(PyMuPdfParser(), inspector, _optional_docling(settings))
 
 
 def _processing_status_from_job(job: ProcessingJob) -> ProcessingStatus:
