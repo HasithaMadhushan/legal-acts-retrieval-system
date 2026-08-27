@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { Download } from "lucide-react";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   createSavedItem,
   deleteSavedItem,
   exportUrl,
   getAct,
   getActRelationships,
-  getRelationshipGraph,
   getSectionRelationships,
   listActs,
   listSavedItems
@@ -18,7 +17,6 @@ import { displayActTitle, displayActTitleWithMeta } from "@/lib/act-display";
 import { getToken } from "@/lib/auth";
 import type {
   LegalAct,
-  RelationshipGraphResponse,
   RelationshipListResponse,
   RelationshipRow,
   RelationshipType,
@@ -38,7 +36,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { graphEdgeKey, type GraphEdgeSelection } from "@/lib/graph-edges";
+import { graphEdgeKey, graphModelFromRows, type GraphEdgeSelection } from "@/lib/graph-edges";
 import { otherActId } from "@/lib/linked-acts";
 import {
   buildRelationshipDossier,
@@ -71,7 +69,6 @@ export default function LawyerRelationshipsPage() {
   const [depth, setDepth] = useState<1 | 2>(2);
   const [relationships, setRelationships] = useState<RelationshipListResponse | null>(null);
   const [dossierRows, setDossierRows] = useState<RelationshipRow[]>([]);
-  const [graph, setGraph] = useState<RelationshipGraphResponse | null>(null);
   const [savedItems, setSavedItems] = useState<SavedItem[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<GraphEdgeSelection | null>(null);
@@ -101,11 +98,11 @@ export default function LawyerRelationshipsPage() {
     if (sectionId) {
       setLookupMode("section");
       setFocusId(sectionId);
-      void loadRelationships("section", sectionId, 0, depth);
+      void loadRelationships("section", sectionId, 0);
     } else if (actId) {
       setLookupMode("act");
       setFocusId(actId);
-      void loadRelationships("act", actId, 0, depth);
+      void loadRelationships("act", actId, 0);
     }
   }
 
@@ -121,22 +118,11 @@ export default function LawyerRelationshipsPage() {
   function filterParams() {
     return {
       ...(relationshipType !== "ANY" ? { relationship_type: relationshipType } : {}),
-      ...(statusFilter !== "verified_pending" && statusFilter !== "ANY"
-        ? { verification_status: statusFilter }
-        : {})
+      ...(statusFilter !== "ANY" ? { verification_status: statusFilter } : {})
     };
   }
 
-  function queryParams(nextOffset: number, nextDepth: number) {
-    return {
-      ...filterParams(),
-      limit,
-      offset: String(nextOffset),
-      depth: String(nextDepth)
-    };
-  }
-
-  async function loadListPage(mode: LookupMode, id: string, offset: number, pageLimit: number) {
+  function loadListPage(mode: LookupMode, id: string, offset: number, pageLimit: number) {
     const params = { ...filterParams(), limit: String(pageLimit), offset: String(offset) };
     return mode === "act"
       ? getActRelationships(id, params)
@@ -146,8 +132,7 @@ export default function LawyerRelationshipsPage() {
   async function loadRelationships(
     mode: LookupMode = lookupMode,
     id: string = focusId,
-    nextOffset = 0,
-    nextDepth: number = depth
+    nextOffset = 0
   ) {
     if (!id.trim()) {
       setError("Choose a focus Act to render relationships.");
@@ -157,17 +142,11 @@ export default function LawyerRelationshipsPage() {
     setLoading(true);
     try {
       const trimmedId = id.trim();
-      const params = queryParams(nextOffset, nextDepth);
-      const [graphData, catalog] = await Promise.all([
-        getRelationshipGraph({
-          ...params,
-          ...(mode === "act" ? { act_id: trimmedId } : { section_id: trimmedId })
-        }),
-        fetchAllRelationshipRows((pageOffset, pageLimit) =>
-          loadListPage(mode, trimmedId, pageOffset, pageLimit)
-        )
-      ]);
+      const catalog = await fetchAllRelationshipRows((pageOffset, pageLimit) =>
+        loadListPage(mode, trimmedId, pageOffset, pageLimit)
+      );
       const tableLimit = Number(limit);
+      const mapModel = graphModelFromRows(catalog.rows);
       setRelationships({
         ...catalog.list,
         relationships: catalog.rows.slice(nextOffset, nextOffset + tableLimit),
@@ -175,9 +154,8 @@ export default function LawyerRelationshipsPage() {
         offset: nextOffset
       });
       setDossierRows(catalog.rows);
-      setGraph(graphData);
       setOffset(nextOffset);
-      setSelectedNodeId(mode === "act" ? trimmedId : graphData.nodes[0]?.id ?? null);
+      setSelectedNodeId(mode === "act" ? trimmedId : mapModel.nodes[0]?.id ?? null);
       setSelectedEdge(null);
       setExpandedKey(null);
       if (mode === "act") {
@@ -196,7 +174,7 @@ export default function LawyerRelationshipsPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    await loadRelationships(lookupMode, focusId, 0, depth);
+    await loadRelationships(lookupMode, focusId, 0);
   }
 
   function chooseFocus(actId: string) {
@@ -208,7 +186,7 @@ export default function LawyerRelationshipsPage() {
     setLookupMode("act");
     setFocusId(nodeId);
     setDepth(1);
-    await loadRelationships("act", nodeId, 0, 1);
+    await loadRelationships("act", nodeId, 0);
   }
 
   async function saveRelationship(row: RelationshipRow) {
@@ -272,15 +250,16 @@ export default function LawyerRelationshipsPage() {
   const rows = dossierRows.slice(offset, offset + tableLimit);
   const canPageBack = offset > 0;
   const canPageForward = offset + tableLimit < dossierRows.length;
+  const mapModel = useMemo(() => graphModelFromRows(dossierRows), [dossierRows]);
   const focusActRecord =
     focusAct ??
     (focusId ? acts.find((act) => act.id === focusId) ?? null : null);
-  const focusLabel = resolveFocusLabel(focusId, focusActRecord, graph);
+  const focusLabel = resolveFocusLabel(focusId, focusActRecord, mapModel.nodes);
   const focusSelectLabel = focusId ? focusLabel || "Selected Act" : "";
   const focusSelectTitle = focusActRecord
     ? displayActTitleWithMeta(focusActRecord)
     : focusSelectLabel;
-  const dossierFocusId = lookupMode === "act" ? focusId : graph?.nodes[0]?.id ?? "";
+  const dossierFocusId = lookupMode === "act" ? focusId : mapModel.nodes[0]?.id ?? "";
   const dossierSections = buildRelationshipDossier(dossierRows, dossierFocusId);
 
   return (
@@ -438,12 +417,12 @@ export default function LawyerRelationshipsPage() {
         {viewMode === "graph" ? (
           <div className="grid items-start gap-[18px] xl:grid-cols-[minmax(0,1fr)_minmax(380px,1fr)]">
             <RelationshipGraph
-              nodes={graph?.nodes ?? []}
-              edges={graph?.edges ?? []}
-              focusId={lookupMode === "act" ? focusId : graph?.nodes[0]?.id}
+              nodes={mapModel.nodes}
+              edges={mapModel.edges}
+              focusId={lookupMode === "act" ? focusId : mapModel.nodes[0]?.id}
               focusLabel={focusLabel}
-              depth={graph?.depth ?? depth}
-              unresolvedCount={graph?.summary.unresolved_count ?? summary?.unresolved_count ?? 0}
+              depth={depth}
+              unresolvedCount={summary?.unresolved_count ?? 0}
               hasRendered={Boolean(relationships)}
               statusFilter={statusFilter}
               totalResults={summary?.total_results ?? 0}
@@ -652,12 +631,12 @@ function formatActOption(act: LegalAct) {
 function resolveFocusLabel(
   focusId: string,
   focusActRecord: LegalAct | null,
-  graph: RelationshipGraphResponse | null
+  nodes: readonly { id: string; label: string }[]
 ) {
   if (!focusId) return "";
   if (focusActRecord) return displayActTitle(focusActRecord);
   return displayActTitle({
-    title: graph?.nodes.find((node) => node.id === focusId)?.label,
+    title: nodes.find((node) => node.id === focusId)?.label,
     act_number: null,
     year: null,
     source_file_name: null

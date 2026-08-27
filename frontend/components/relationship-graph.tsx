@@ -226,7 +226,7 @@ export function RelationshipGraph({
           className="pointer-events-auto"
           transform={`translate(${392 * (1 - zoom)} ${280 * (1 - zoom)}) scale(${zoom})`}
         >
-          {aggregatedEdges.slice(0, 24).map((edge) => (
+          {aggregatedEdges.map((edge) => (
             <GraphEdgeLink
               key={edge.key}
               edge={edge}

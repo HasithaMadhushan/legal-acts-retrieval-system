@@ -129,3 +129,23 @@ class VerificationSummaryRead(BaseModel):
     rejected_references: int
     mapped_references: int
     unresolved_references: int
+
+
+class ActReviewQueueItem(BaseModel):
+    act_id: str
+    title: str
+    act_number: str | None
+    year: int | None
+    needs_review_references: int
+    unresolved_references: int
+
+
+class MappingRemapRead(BaseModel):
+    total_references: int
+    mapped_act_count: int
+    mapped_section_count: int
+    unresolved_count: int
+    principal_context_used_count: int
+    skipped_locked_count: int
+    confidence_bands: dict[str, int]
+    warnings: list[str]

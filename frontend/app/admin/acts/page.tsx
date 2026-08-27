@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getAct, getEvaluationMetricsSummary, listActs, processAct } from "@/lib/api";
-import type { EvaluationMetricsSummary, LegalAct } from "@/lib/types";
+import { getAct, getEvaluationMetricsSummary, listActs, listReferenceReviewQueue, processAct } from "@/lib/api";
+import type { ActReviewQueueItem, EvaluationMetricsSummary, LegalAct } from "@/lib/types";
 import { RoleGuard } from "@/components/role-guard";
 import { StatusBadge } from "@/components/status-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -22,6 +22,7 @@ function sleep(ms: number) {
 
 export default function AdminActsPage() {
   const [acts, setActs] = useState<LegalAct[]>([]);
+  const [reviewQueue, setReviewQueue] = useState<ActReviewQueueItem[]>([]);
   const [metrics, setMetrics] = useState<EvaluationMetricsSummary | null>(null);
   const [error, setError] = useState("");
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
@@ -32,9 +33,14 @@ export default function AdminActsPage() {
 
   async function load() {
     try {
-      const [actsData, metricsData] = await Promise.all([listActs(), getEvaluationMetricsSummary()]);
+      const [actsData, metricsData, queueData] = await Promise.all([
+        listActs(),
+        getEvaluationMetricsSummary(),
+        listReferenceReviewQueue()
+      ]);
       setActs(actsData);
       setMetrics(metricsData);
+      setReviewQueue(queueData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load Acts.");
     }
@@ -118,7 +124,8 @@ export default function AdminActsPage() {
           <div>
             <h1 className="font-serif text-[30px] font-semibold tracking-[-0.45px] text-[#0b1626]">Acts</h1>
             <p className="mt-2 max-w-xl text-[14.5px] text-muted-foreground">
-              Uploaded corpus with processing state. Trigger reprocessing from an Act&apos;s detail page.
+              Uploaded corpus with processing state. Review needs-review citations from the queue, or trigger
+              reprocessing from an Act&apos;s detail page.
             </p>
           </div>
           <Link href="/admin/acts/upload" className={cn(buttonVariants({ size: "sm" }), "h-[30px] rounded-md")}>
@@ -139,7 +146,59 @@ export default function AdminActsPage() {
           <span>
             <strong className="text-[#22684a]">{counts.verified}</strong> verified
           </span>
+          <span>
+            <strong className="text-[#92681f]">{reviewQueue.length}</strong> acts in review queue
+          </span>
         </div>
+
+        {reviewQueue.length ? (
+          <div className="overflow-hidden rounded-lg border border-[#c9a882] bg-card">
+            <div className="border-b border-[#c9a882] px-4 py-3">
+              <h2 className="font-serif text-lg font-semibold">Reference review queue</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Acts with citations the mapper could not confirm. Open the queue, remap unverified rows, then
+                verify or reject.
+              </p>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Act</TableHead>
+                  <TableHead>Needs review</TableHead>
+                  <TableHead>Unresolved</TableHead>
+                  <TableHead>
+                    <span className="sr-only">Action</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {reviewQueue.map((item) => (
+                  <TableRow key={item.act_id}>
+                    <TableCell>
+                      <Link href={`/admin/acts/${item.act_id}`} className="font-serif font-semibold hover:underline">
+                        {item.title}
+                      </Link>
+                      <div className="text-xs text-muted-foreground">
+                        No. {item.act_number ?? "—"}
+                        {item.year ? ` of ${item.year}` : ""}
+                      </div>
+                    </TableCell>
+                    <TableCell>{item.needs_review_references}</TableCell>
+                    <TableCell>{item.unresolved_references}</TableCell>
+                    <TableCell className="text-right">
+                      <Link
+                        className={buttonVariants({ variant: "outline", size: "sm" })}
+                        href={`/admin/acts/${item.act_id}/references?status=NEEDS_REVIEW`}
+                      >
+                        Review citations
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Input

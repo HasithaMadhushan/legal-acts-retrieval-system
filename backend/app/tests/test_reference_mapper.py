@@ -9,6 +9,7 @@ from app.services.reference_mapper import (
     build_mapping_context,
     map_reference_with_result,
     map_references,
+    remap_unverified_references,
     summarize_mapping,
 )
 from app.services.text_cleaner import normalize_for_search
@@ -318,3 +319,145 @@ def test_mapping_summary_counts_and_confidence_bands():
         assert summary["confidence_bands"]["exact"] == 1
         assert summary["confidence_bands"]["partial"] == 1
         assert summary["confidence_bands"]["unresolved"] == 1
+
+
+def test_maps_act_name_embedded_in_a_definition_sentence():
+    with SessionLocal() as db:
+        source = _act(db, "Value Added Tax Act", number="14", year=2002)
+        inland_revenue = _act(db, "Inland Revenue Act", number="24", year=2017)
+        reference = _reference(
+            source,
+            target_act_title_raw="means a director as defined in the Inland Revenue Act",
+            raw_reference_text="director has the same meaning as in the Inland Revenue Act",
+        )
+
+        result = map_reference_with_result(db, reference)
+
+        assert result.mapped_act is True
+        assert result.confidence_band == "exact"
+        assert reference.target_act_id == inland_revenue.id
+
+
+def test_does_not_map_a_named_act_that_is_not_in_the_corpus():
+    with SessionLocal() as db:
+        source = _act(db, "Value Added Tax Act", number="14", year=2002)
+        _act(db, "Inland Revenue Act", number="24", year=2017)
+        reference = _reference(
+            source,
+            target_act_title_raw="Companies Act",
+            raw_reference_text="as defined in the Companies Act",
+        )
+
+        result = map_reference_with_result(db, reference)
+
+        assert result.mapped_act is False
+        assert reference.target_act_id is None
+        assert reference.verification_status == VerificationStatus.NEEDS_REVIEW
+
+
+def test_does_not_map_cited_number_and_year_to_a_later_enactment_with_the_same_title():
+    with SessionLocal() as db:
+        source = _act(db, "Value Added Tax Act", number="14", year=2002)
+        current_ira = _act(db, "Inland Revenue Act", number="24", year=2017)
+        reference = _reference(
+            source,
+            target_act_title_raw="Inland Revenue Act",
+            target_act_number="38",
+            target_act_year=2000,
+        )
+
+        result = map_reference_with_result(db, reference)
+
+        assert result.mapped_act is False
+        assert reference.target_act_id is None
+        assert reference.target_act_id != current_ira.id
+        assert any("number and year" in warning.lower() for warning in result.warnings)
+
+
+def test_fills_missing_number_and_year_from_the_raw_citation():
+    with SessionLocal() as db:
+        source = _act(db, "Value Added Tax Act", number="14", year=2002)
+        gst = _act(db, "Goods and Services Tax Act", number="34", year=1996)
+        reference = _reference(
+            source,
+            raw_reference_text="the tax imposed by the Goods and Services Tax Act, No. 34 of 1996",
+            target_act_title_raw="the tax imposed by the Goods and Services Tax Act",
+        )
+
+        result = map_reference_with_result(db, reference)
+
+        assert result.mapped_act is True
+        assert result.confidence_band == "exact"
+        assert reference.target_act_id == gst.id
+        assert reference.target_act_number == "34"
+        assert reference.target_act_year == 1996
+
+
+def test_remap_unverified_maps_pending_and_skips_verified_and_rejected():
+    with SessionLocal() as db:
+        source = _act(db, "Value Added Tax Act", number="14", year=2002)
+        inland_revenue = _act(db, "Inland Revenue Act", number="24", year=2017)
+        gst = _act(db, "Goods and Services Tax Act", number="34", year=1996)
+        pending = _reference(
+            source,
+            target_act_title_raw="means a director as defined in the Inland Revenue Act",
+            verification_status=VerificationStatus.PENDING,
+        )
+        needs_review = _reference(
+            source,
+            target_act_title_raw="Inland Revenue Act",
+            verification_status=VerificationStatus.NEEDS_REVIEW,
+        )
+        verified = _reference(
+            source,
+            target_act_title_raw="Inland Revenue Act",
+            verification_status=VerificationStatus.VERIFIED,
+        )
+        rejected = _reference(
+            source,
+            target_act_number="34",
+            target_act_year=1996,
+            verification_status=VerificationStatus.REJECTED,
+        )
+        db.add_all([pending, needs_review, verified, rejected])
+        db.flush()
+
+        summary = remap_unverified_references(db, source)
+
+        assert pending.target_act_id == inland_revenue.id
+        assert needs_review.target_act_id == inland_revenue.id
+        assert verified.target_act_id is None
+        assert rejected.target_act_id is None
+        assert rejected.target_act_id != gst.id
+        assert summary["mapped_act_count"] == 2
+        assert summary["skipped_locked_count"] == 2
+
+
+def test_remap_uses_a_locked_citation_as_principal_enactment_context():
+    with SessionLocal() as db:
+        source = _act(db, "Social Security Contribution Levy Amendment Act", number="10", year=2026)
+        principal = _act(db, "Social Security Contribution Levy Act", number="25", year=2022)
+        section = _section(db, principal, "5", heading="Chargeability")
+        intro = _reference(
+            source,
+            raw_reference_text="Social Security Contribution Levy Act, No. 25 of 2022",
+            target_act_title_raw="Social Security Contribution Levy Act",
+            target_act_number="25",
+            target_act_year=2022,
+            target_act_id=principal.id,
+            verification_status=VerificationStatus.VERIFIED,
+        )
+        later = _reference(
+            source,
+            raw_reference_text="Section 5 of the principal enactment",
+            target_section_number="section 5",
+            verification_status=VerificationStatus.PENDING,
+        )
+        db.add_all([intro, later])
+        db.flush()
+
+        remap_unverified_references(db, source)
+
+        assert later.target_act_id == principal.id
+        assert later.target_section_id == section.id
+        assert intro.target_act_id == principal.id

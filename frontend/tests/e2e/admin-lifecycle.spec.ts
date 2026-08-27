@@ -148,7 +148,7 @@ test.describe("Admin lifecycle QA", () => {
     await sectionForm.getByRole("button", { name: "Verify" }).click();
     await expect(page.getByText("Section verified.")).toBeVisible();
 
-    await page.goto(`/admin/acts/${actId}/references`);
+    await page.goto(`/admin/acts/${actId}/references?status=ANY`);
     await page.getByText("Manual reference creation").click();
     const rawReference = `Playwright mapped reference ${actId}`;
     await page.getByLabel("Raw matched text").last().fill(rawReference);

@@ -1,12 +1,14 @@
 "use client";
 
 import { FormEvent, use, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   createReference,
   linkReferenceTarget,
   listActReferences,
   listProcessingJobs,
   rejectReference,
+  remapActReferences,
   updateReference,
   verifyReference
 } from "@/lib/api";
@@ -33,15 +35,17 @@ import {
 
 export default function AdminReferencesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const searchParams = useSearchParams();
   const [references, setReferences] = useState<LegalReference[]>([]);
   const [jobs, setJobs] = useState<ProcessingJob[]>([]);
   const [relationshipFilter, setRelationshipFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(() => initialStatusFilter(searchParams.get("status")));
   const [targetFilter, setTargetFilter] = useState("");
   const [confidenceFilter, setConfidenceFilter] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [isRemapping, setIsRemapping] = useState(false);
 
   async function load() {
     try {
@@ -114,6 +118,23 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
     }
   }
 
+  async function remap() {
+    setError("");
+    setMessage("");
+    setIsRemapping(true);
+    try {
+      const summary = await remapActReferences(id);
+      setMessage(
+        `Remapped ${summary.mapped_act_count} of ${summary.total_references} unverified references. ${summary.skipped_locked_count} verified or rejected rows were left unchanged.`
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Remap failed.");
+    } finally {
+      setIsRemapping(false);
+    }
+  }
+
   async function createManualReference(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -151,6 +172,10 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
   const latestMappingSummary = jobs[0]?.summary_json?.mapping;
   const referenceWarnings = latestReferenceSummary?.warnings ?? [];
   const mappingWarnings = latestMappingSummary?.warnings ?? [];
+  const needsReviewCount = references.filter(
+    (reference) => reference.verification_status === "NEEDS_REVIEW"
+  ).length;
+  const pendingCount = references.filter((reference) => reference.verification_status === "PENDING").length;
   const filteredReferences = references.filter((reference) => {
     if (relationshipFilter && reference.relationship_type !== relationshipFilter) return false;
     if (statusFilter && reference.verification_status !== statusFilter) return false;
@@ -170,11 +195,13 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
             Reference verification
           </h1>
           <p className="mt-2 max-w-3xl text-[14.5px] text-muted-foreground">
-            Verify, correct or reject extracted statutory references. Verified references become visible to
-            Lawyers and General Users.
+            Start with needs-review rows. Verify, correct, or reject before they appear to lawyers. Remap
+            re-runs automatic mapping on unverified rows only — verified and rejected decisions stay in place.
           </p>
-          <div className="mt-3 flex flex-wrap gap-3 text-sm text-muted-foreground">
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
             <span>Detected: {latestReferenceSummary?.references_detected ?? references.length}</span>
+            <span>Needs review: {needsReviewCount}</span>
+            <span>Pending: {pendingCount}</span>
             <span>
               Unresolved parsed targets:{" "}
               {latestReferenceSummary?.unresolved_target_count ??
@@ -187,6 +214,16 @@ export default function AdminReferencesPage({ params }: { params: Promise<{ id: 
               Unresolved mappings:{" "}
               {latestMappingSummary?.unresolved_count ?? references.filter((reference) => !isMapped(reference)).length}
             </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-[30px] bg-card"
+              onClick={() => void remap()}
+              disabled={isRemapping}
+            >
+              {isRemapping ? "Remapping…" : "Remap unverified"}
+            </Button>
           </div>
           {referenceWarnings.length > 0 ? (
             <div className="mt-4 rounded-lg border border-border bg-card p-4">
@@ -435,6 +472,14 @@ function hasStructuredTarget(reference: LegalReference) {
 
 function isMapped(reference: LegalReference) {
   return Boolean(reference.target_act_id || reference.target_section_id);
+}
+
+function initialStatusFilter(status: string | null) {
+  if (status === "ANY") return "";
+  if (status === "PENDING" || status === "NEEDS_REVIEW" || status === "VERIFIED" || status === "REJECTED") {
+    return status;
+  }
+  return "NEEDS_REVIEW";
 }
 
 function optionalString(value: FormDataEntryValue | null) {

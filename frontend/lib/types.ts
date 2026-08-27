@@ -163,6 +163,26 @@ export interface VerificationSummary {
   unresolved_references: number;
 }
 
+export interface ActReviewQueueItem {
+  act_id: string;
+  title: string;
+  act_number: string | null;
+  year: number | null;
+  needs_review_references: number;
+  unresolved_references: number;
+}
+
+export interface MappingRemapResult {
+  total_references: number;
+  mapped_act_count: number;
+  mapped_section_count: number;
+  unresolved_count: number;
+  principal_context_used_count: number;
+  skipped_locked_count: number;
+  confidence_bands: Record<string, number>;
+  warnings: string[];
+}
+
 export interface Section {
   id: string;
   act_id: string;

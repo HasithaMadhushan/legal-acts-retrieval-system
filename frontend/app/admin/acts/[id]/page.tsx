@@ -9,6 +9,7 @@ import {
   getVerificationSummary,
   listProcessingJobs,
   processAct,
+  remapActReferences,
   updateAct
 } from "@/lib/api";
 import type { LegalAct, ProcessingJob, VerificationSummary } from "@/lib/types";
@@ -72,6 +73,7 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isRemapping, setIsRemapping] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const isMountedRef = useRef(true);
@@ -139,6 +141,25 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
       await load();
     } finally {
       if (isMountedRef.current) setIsProcessing(false);
+    }
+  }
+
+  async function runRemap() {
+    setError("");
+    setMessage("");
+    setIsRemapping(true);
+    try {
+      const summary = await remapActReferences(id);
+      if (!isMountedRef.current) return;
+      await load();
+      setMessage(
+        `Remapped ${summary.mapped_act_count} of ${summary.total_references} unverified references. ${summary.skipped_locked_count} verified or rejected rows were left unchanged.`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Remap failed.");
+      await load();
+    } finally {
+      if (isMountedRef.current) setIsRemapping(false);
     }
   }
 
@@ -212,8 +233,16 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button onClick={() => void runProcess()} disabled={isProcessing}>
+                <Button onClick={() => void runProcess()} disabled={isProcessing || isRemapping}>
                   {isProcessing ? "Processing…" : "Reprocess ↻"}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="bg-card"
+                  onClick={() => void runRemap()}
+                  disabled={isProcessing || isRemapping}
+                >
+                  {isRemapping ? "Remapping…" : "Remap unverified"}
                 </Button>
                 <Link
                   href={`/admin/acts/${act.id}/sections`}
@@ -222,7 +251,7 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
                   Review sections
                 </Link>
                 <Link
-                  href={`/admin/acts/${act.id}/references`}
+                  href={`/admin/acts/${act.id}/references?status=NEEDS_REVIEW`}
                   className={cn(buttonVariants({ variant: "outline", size: "default" }), "bg-card")}
                 >
                   Review references
@@ -385,10 +414,10 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
                     Verify or correct before they appear to lawyers & users →
                   </p>
                   <Link
-                    href={`/admin/acts/${id}/references`}
+                    href={`/admin/acts/${id}/references?status=NEEDS_REVIEW`}
                     className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-3 inline-flex bg-card")}
                   >
-                    Open references
+                    Open needs-review queue
                   </Link>
                 </CardContent>
               </Card>

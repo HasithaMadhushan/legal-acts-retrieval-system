@@ -140,6 +140,8 @@ describe("frontend role and safety smoke checks", () => {
     expect(adminActsPage).toContain("Uploaded");
     expect(adminActsPage).toContain("verified");
     expect(adminActsPage).toContain("processing");
+    expect(adminActsPage).toContain("Reference review queue");
+    expect(adminActsPage).toContain("Review citations");
   });
 
   it("admin act detail exposes processing job summary fields", () => {
@@ -148,6 +150,8 @@ describe("frontend role and safety smoke checks", () => {
     expect(adminActDetailPage).toContain("Verification summary");
     expect(adminActDetailPage).toContain("Pending sections");
     expect(adminActDetailPage).toContain("Mapped references");
+    expect(adminActDetailPage).toContain("Remap unverified");
+    expect(adminActDetailPage).toContain("Open needs-review queue");
     expect(adminActDetailPage).toContain("Requested parser");
     expect(adminActDetailPage).toContain("Latest job parser");
     expect(adminActDetailPage).toContain("extraction_artifact.parser_name");
@@ -192,6 +196,9 @@ describe("frontend role and safety smoke checks", () => {
     expect(adminReferencesPage).toContain("Unresolved mapping");
     expect(adminReferencesPage).toContain("Confidence range");
     expect(adminReferencesPage).toContain("ADDS");
+    expect(adminReferencesPage).toContain("Remap unverified");
+    expect(adminReferencesPage).toContain("Needs review:");
+    expect(adminReferencesPage).toContain('return "NEEDS_REVIEW"');
     expect(referenceTable).toContain("Source section");
     expect(referenceTable).toContain("Target path");
     expect(referenceTable).toContain("Mapped target Act ID");
@@ -252,6 +259,8 @@ describe("frontend role and safety smoke checks", () => {
     expect(relationshipsPage).toContain("Verified + pending");
     expect(relationshipsPage).toContain('placeholder="Choose an Act to focus the graph"');
     expect(relationshipsPage).toContain("fetchAllRelationshipRows");
+    expect(relationshipsPage).toContain("graphModelFromRows");
+    expect(relationshipsPage).toContain('statusFilter !== "ANY"');
     expect(actDetailPage).toContain("Open relationship explorer");
     expect(sectionDetailPage).toContain("Open relationship explorer");
   });

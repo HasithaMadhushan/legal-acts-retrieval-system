@@ -1,5 +1,6 @@
 import { clearSession, getToken } from "@/lib/auth";
 import type {
+  ActReviewQueueItem,
   LegalAct,
   LegalReference,
   EvaluationMetricsSummary,
@@ -7,6 +8,7 @@ import type {
   EvaluationRunCreatePayload,
   GoldReference,
   GoldReferenceCreatePayload,
+  MappingRemapResult,
   ProcessingJob,
   ReferenceCreatePayload,
   RelationshipGraphResponse,
@@ -195,6 +197,14 @@ export async function uploadAct(formData: FormData) {
 
 export async function processAct(id: string) {
   return apiFetch<ProcessingJob>(`/acts/${id}/process`, { method: "POST" });
+}
+
+export async function remapActReferences(id: string) {
+  return apiFetch<MappingRemapResult>(`/acts/${id}/remap-references`, { method: "POST" });
+}
+
+export async function listReferenceReviewQueue() {
+  return apiFetch<ActReviewQueueItem[]>("/acts/review-queue");
 }
 
 export async function listProcessingJobs(id: string) {
