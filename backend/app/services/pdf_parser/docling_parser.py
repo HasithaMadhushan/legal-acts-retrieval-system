@@ -1,7 +1,12 @@
 from multiprocessing import Queue, get_context
 from pathlib import Path
 
-from app.services.pdf_parser.base import ParsedPdf, PdfExtractionError
+from app.services.pdf_parser.base import (
+    STRUCTURED_SCHEMA_VERSION,
+    ParsedPdf,
+    PdfExtractionError,
+    StructuredDocument,
+)
 from app.services.pdf_parser.pymupdf_parser import PyMuPdfParser
 from app.services.pdf_text_normalizer import markdown_to_legal_text
 
@@ -23,9 +28,9 @@ class DoclingParser:
         try:
             from docling.document_converter import DocumentConverter
         except ImportError:
-            parsed = PyMuPdfParser().extract(file_path)
-            parsed.warnings.insert(0, "Docling is not installed; PyMuPDF fallback was used.")
-            return parsed
+            return _gated_pymupdf_fallback(
+                file_path, "Docling is not installed; PyMuPDF fallback was used."
+            )
 
         try:
             if self.timeout_seconds is None:
@@ -33,14 +38,13 @@ class DoclingParser:
             else:
                 conversion = _convert_with_timeout(path, self.timeout_seconds)
         except Exception as exc:
-            parsed = PyMuPdfParser().extract(file_path)
-            parsed.warnings.insert(
-                0,
+            return _gated_pymupdf_fallback(
+                file_path,
                 f"Docling extraction failed; PyMuPDF fallback was used. Reason: {exc}",
             )
-            return parsed
 
-        text = markdown_to_legal_text(str(conversion["text"]))
+        markdown = str(conversion["text"])
+        text = markdown_to_legal_text(markdown)
         page_texts = _split_markdown_pages(text)
         return ParsedPdf(
             full_text=text,
@@ -48,7 +52,20 @@ class DoclingParser:
             page_texts=page_texts,
             parser_name=self.parser_name,
             warnings=[] if text.strip() else ["Docling did not produce extractable text."],
+            structured_document=StructuredDocument(
+                schema_version=STRUCTURED_SCHEMA_VERSION,
+                pages=None,
+                markdown=markdown,
+            ),
         )
+
+
+def _gated_pymupdf_fallback(file_path: str, warning: str) -> ParsedPdf:
+    from app.services.pdf_parser.native_first_parser import NativeFirstPdfParser
+
+    parsed = NativeFirstPdfParser(PyMuPdfParser(), None, None).extract(file_path)
+    parsed.warnings.insert(0, warning)
+    return parsed
 
 
 def _split_markdown_pages(text: str) -> list[str]:

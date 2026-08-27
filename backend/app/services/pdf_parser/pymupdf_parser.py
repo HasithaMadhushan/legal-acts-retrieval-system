@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from app.services.pdf_parser.base import ParsedPdf, PdfExtractionError
+from app.services.pdf_parser.base import (
+    PAGE_SEPARATOR,
+    ParsedPdf,
+    PdfExtractionError,
+    structured_pages_from_texts,
+)
 
 
 class PyMuPdfParser:
@@ -37,9 +42,12 @@ class PyMuPdfParser:
             ) from exc
 
         return ParsedPdf(
-            full_text="\n\n".join(page_texts),
+            full_text=PAGE_SEPARATOR.join(page_texts),
             page_count=len(page_texts),
             page_texts=page_texts,
             parser_name=self.parser_name,
             warnings=warnings,
+            structured_document=structured_pages_from_texts(
+                page_texts, extraction_method="native"
+            ),
         )

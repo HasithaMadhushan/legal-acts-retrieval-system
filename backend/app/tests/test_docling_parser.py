@@ -5,6 +5,7 @@ import fitz
 
 import app.services.pdf_parser.docling_parser as docling_parser_module
 from app.services.pdf_parser.docling_parser import DoclingParser
+from app.services.pdf_parser.quality_gated_parser import STRUCTURAL_REVIEW_WARNING
 
 
 def _pdf_file(path, text: str) -> None:
@@ -48,6 +49,9 @@ def test_docling_parser_uses_document_converter(monkeypatch, tmp_path):
     assert parsed.parser_name == "DOCLING"
     assert parsed.page_count == 2
     assert parsed.full_text == "Test Legal Act\n\n1. Short title."
+    assert parsed.structured_document is not None
+    assert parsed.structured_document.pages is None
+    assert parsed.structured_document.markdown == "# Test Legal Act\n\n**1.** Short title."
     assert parsed.warnings == []
 
 
@@ -66,6 +70,7 @@ def test_docling_parser_falls_back_to_pymupdf_when_conversion_fails(monkeypatch,
     assert parsed.parser_name == "PYMUPDF"
     assert "Fallback text" in parsed.full_text
     assert any("Docling extraction failed" in warning for warning in parsed.warnings)
+    assert STRUCTURAL_REVIEW_WARNING in parsed.warnings
 
 
 def test_docling_parser_falls_back_to_pymupdf_when_conversion_times_out(monkeypatch, tmp_path):
@@ -82,3 +87,4 @@ def test_docling_parser_falls_back_to_pymupdf_when_conversion_times_out(monkeypa
     assert parsed.parser_name == "PYMUPDF"
     assert "Timeout fallback text" in parsed.full_text
     assert any("Docling extraction exceeded" in warning for warning in parsed.warnings)
+    assert STRUCTURAL_REVIEW_WARNING in parsed.warnings

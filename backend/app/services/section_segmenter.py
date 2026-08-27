@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 
 from app.core.roles import SectionType
+from app.services.pdf_parser.preparation import PageSpan
 from app.services.text_cleaner import normalize_for_search
 
 SECTION_START_RE = re.compile(r"(?m)^\s*(?P<number>\d{1,3}[A-Z]?)\.\s*(?P<heading>.*)$")
@@ -45,6 +46,8 @@ class SectionDraft:
     sort_order: int
     page_start: int | None = None
     page_end: int | None = None
+    source_start: int | None = None
+    source_end: int | None = None
 
 
 @dataclass
@@ -67,53 +70,30 @@ def segment_sections(text: str) -> list[SectionDraft]:
 
 
 def segment_act_text(text: str) -> SegmentationResult:
+    leading = len(text) - len(text.lstrip())
     normalized_text = text.strip()
     warnings: list[str] = []
     possible_cover_text_removed = False
 
     if not normalized_text:
         warnings.append("No text was available for section segmentation.")
-        return _fallback_result("", warnings, possible_cover_text_removed)
+        return _fallback_result("", warnings, possible_cover_text_removed, leading=leading)
 
     boundaries = _find_boundaries(normalized_text)
     if not any(boundary.kind == SectionType.SECTION for boundary in boundaries):
         warnings.append("No numbered sections were detected; fallback section was created.")
-        return _fallback_result(normalized_text, warnings, possible_cover_text_removed)
-
-    drafts: list[SectionDraft] = []
-    preamble_text, removed_cover = _clean_preamble(normalized_text[: boundaries[0].start])
-    possible_cover_text_removed = removed_cover
-    if preamble_text:
-        drafts.append(
-            _draft(
-                section_number="PREAMBLE",
-                section_path="PREAMBLE",
-                heading="Preamble",
-                section_type=SectionType.PREAMBLE,
-                text=preamble_text,
-                sort_order=len(drafts),
-            )
+        return _fallback_result(
+            normalized_text, warnings, possible_cover_text_removed, leading=leading
         )
 
-    for index, boundary in enumerate(boundaries):
-        end = boundaries[index + 1].start if index + 1 < len(boundaries) else len(normalized_text)
-        block = normalized_text[boundary.start:end].strip()
-        if not block:
-            continue
-        drafts.append(
-            _draft(
-                section_number=boundary.number,
-                section_path=boundary.number,
-                heading=boundary.heading,
-                section_type=boundary.kind,
-                text=block,
-                sort_order=len(drafts),
-            )
-        )
-
+    drafts, possible_cover_text_removed = _drafts_from_normalized(
+        normalized_text, leading, boundaries
+    )
     if not drafts:
         warnings.append("Segmentation produced no records; fallback section was created.")
-        return _fallback_result(normalized_text, warnings, possible_cover_text_removed)
+        return _fallback_result(
+            normalized_text, warnings, possible_cover_text_removed, leading=leading
+        )
 
     main_sections = [draft for draft in drafts if draft.section_type == SectionType.SECTION]
     schedules = [draft for draft in drafts if draft.section_type == SectionType.SCHEDULE]
@@ -129,6 +109,45 @@ def segment_act_text(text: str) -> SegmentationResult:
     if any(draft.section_type == SectionType.PREAMBLE for draft in drafts):
         warnings.append("Preamble text was retained separately from numbered sections.")
     return SegmentationResult(sections=drafts, summary=summary)
+
+
+def _drafts_from_normalized(
+    normalized_text: str, leading: int, boundaries: list[_Boundary]
+) -> tuple[list[SectionDraft], bool]:
+    drafts: list[SectionDraft] = []
+    preamble_end = boundaries[0].start
+    preamble_text, removed_cover = _clean_preamble(normalized_text[:preamble_end])
+    if preamble_text:
+        drafts.append(
+            _draft(
+                section_number="PREAMBLE",
+                section_path="PREAMBLE",
+                heading="Preamble",
+                section_type=SectionType.PREAMBLE,
+                text=preamble_text,
+                sort_order=len(drafts),
+                source_start=leading,
+                source_end=leading + preamble_end,
+            )
+        )
+    for index, boundary in enumerate(boundaries):
+        end = boundaries[index + 1].start if index + 1 < len(boundaries) else len(normalized_text)
+        block = normalized_text[boundary.start:end].strip()
+        if not block:
+            continue
+        drafts.append(
+            _draft(
+                section_number=boundary.number,
+                section_path=boundary.number,
+                heading=boundary.heading,
+                section_type=boundary.kind,
+                text=block,
+                sort_order=len(drafts),
+                source_start=leading + boundary.start,
+                source_end=leading + end,
+            )
+        )
+    return drafts, removed_cover
 
 
 def _find_boundaries(text: str) -> list[_Boundary]:
@@ -245,8 +264,33 @@ def _is_cover_or_title_line(line: str) -> bool:
     return False
 
 
+def attach_section_pages(
+    sections: list[SectionDraft], page_spans: list[PageSpan] | None
+) -> None:
+    if page_spans is None:
+        return
+    for section in sections:
+        if section.source_start is None or section.source_end is None:
+            continue
+        overlapping = [
+            span
+            for span in page_spans
+            if span.start < span.end
+            and span.start < section.source_end
+            and span.end > section.source_start
+        ]
+        if not overlapping:
+            continue
+        section.page_start = overlapping[0].page_number
+        section.page_end = overlapping[-1].page_number
+
+
 def _fallback_result(
-    text: str, warnings: list[str], possible_cover_text_removed: bool
+    text: str,
+    warnings: list[str],
+    possible_cover_text_removed: bool,
+    *,
+    leading: int,
 ) -> SegmentationResult:
     fallback_text, removed_cover = _clean_preamble(text)
     if not fallback_text:
@@ -259,6 +303,8 @@ def _fallback_result(
         section_type=SectionType.OTHER,
         text=fallback_text,
         sort_order=0,
+        source_start=leading,
+        source_end=leading + len(text.strip()),
     )
     return SegmentationResult(
         sections=[draft],
@@ -281,6 +327,8 @@ def _draft(
     section_type: SectionType,
     text: str,
     sort_order: int,
+    source_start: int | None = None,
+    source_end: int | None = None,
 ) -> SectionDraft:
     cleaned_text = text.strip()
     return SectionDraft(
@@ -291,6 +339,8 @@ def _draft(
         text=cleaned_text,
         normalized_text=normalize_for_search(cleaned_text),
         sort_order=sort_order,
+        source_start=source_start,
+        source_end=source_end,
     )
 
 

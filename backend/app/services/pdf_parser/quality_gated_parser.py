@@ -1,9 +1,14 @@
 import math
 
 from app.services.pdf_parser.base import ParsedPdf, PdfExtractionError, PdfParser
+from app.services.pdf_parser.preparation import prepare_act_pages
 from app.services.reference_extractor import extract_references
 from app.services.section_segmenter import segment_act_text
 from app.services.text_cleaner import normalize_for_search
+
+STRUCTURAL_REVIEW_WARNING = (
+    "Native structural validation failed and no fallback passed; manual review required."
+)
 
 
 class QualityGatedPdfParser:
@@ -31,6 +36,7 @@ class QualityGatedPdfParser:
             baseline_error = exc
             warnings.append(f"{self.final_fallback.parser_name} baseline extraction failed: {exc}")
 
+        baseline_text = prepare_act_pages(baseline).text if baseline is not None else None
         candidates = [self.primary]
         if self.docling_fallback is not None:
             candidates.append(self.docling_fallback)
@@ -42,7 +48,11 @@ class QualityGatedPdfParser:
                 warnings.append(f"{parser.parser_name} extraction failed: {exc}")
                 continue
 
-            quality_errors = segmentation_quality_errors(parsed, baseline=baseline)
+            quality_errors = segmentation_quality_errors(
+                parsed,
+                processing_text=prepare_act_pages(parsed).text,
+                baseline_text=baseline_text,
+            )
             if not quality_errors:
                 parsed.warnings = [*warnings, *parsed.warnings]
                 return parsed
@@ -57,14 +67,21 @@ class QualityGatedPdfParser:
                 parser_name=getattr(self.final_fallback, "parser_name", "UNKNOWN"),
                 warnings=warnings,
             ) from baseline_error
+        if baseline_text is not None and segmentation_quality_errors(
+            baseline, processing_text=baseline_text
+        ):
+            warnings.append(STRUCTURAL_REVIEW_WARNING)
         baseline.warnings = [*warnings, *baseline.warnings]
         return baseline
 
 
 def segmentation_quality_errors(
-    parsed: ParsedPdf, *, baseline: ParsedPdf | None = None
+    parsed: ParsedPdf,
+    *,
+    processing_text: str,
+    baseline_text: str | None = None,
 ) -> list[str]:
-    text = parsed.full_text.strip()
+    text = processing_text.strip()
     if not text:
         return ["no text was extracted"]
 
@@ -79,24 +96,30 @@ def segmentation_quality_errors(
         errors.append(
             f"detected {section_count} numbered section(s); expected at least {minimum_sections}"
         )
-    if baseline is not None and baseline.full_text.strip():
-        baseline_sections = int(segment_act_text(baseline.full_text).summary["sections_detected"])
-        if baseline_sections and section_count < math.ceil(baseline_sections * 0.8):
-            errors.append(
-                f"section coverage is below PyMuPDF baseline ({section_count}/{baseline_sections})"
-            )
+    if baseline_text is not None and baseline_text.strip():
+        errors.extend(_baseline_coverage_errors(text, section_count, baseline_text))
+    return errors
 
-        baseline_spans = {
-            span
-            for draft in extract_references(baseline.full_text)
-            if len(span := normalize_for_search(draft.raw_reference_text)) >= 12
-        }
-        if baseline_spans:
-            normalized_candidate = normalize_for_search(text)
-            retained = sum(span in normalized_candidate for span in baseline_spans)
-            if retained < math.ceil(len(baseline_spans) * 0.8):
-                errors.append(
-                    "citation-bearing text is below PyMuPDF baseline "
-                    f"({retained}/{len(baseline_spans)} spans retained)"
-                )
+
+def _baseline_coverage_errors(text: str, section_count: int, baseline_text: str) -> list[str]:
+    errors: list[str] = []
+    baseline_sections = int(segment_act_text(baseline_text).summary["sections_detected"])
+    if baseline_sections and section_count < math.ceil(baseline_sections * 0.8):
+        errors.append(
+            f"section coverage is below PyMuPDF baseline ({section_count}/{baseline_sections})"
+        )
+
+    baseline_spans = {
+        span
+        for draft in extract_references(baseline_text)
+        if len(span := normalize_for_search(draft.raw_reference_text)) >= 12
+    }
+    if baseline_spans:
+        normalized_candidate = normalize_for_search(text)
+        retained = sum(span in normalized_candidate for span in baseline_spans)
+        if retained < math.ceil(len(baseline_spans) * 0.8):
+            errors.append(
+                "citation-bearing text is below PyMuPDF baseline "
+                f"({retained}/{len(baseline_spans)} spans retained)"
+            )
     return errors
