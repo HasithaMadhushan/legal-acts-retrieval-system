@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 
 
 class Storage:
-    """Backend-agnostic interface for saving and reading uploaded PDFs."""
+    """Backend-agnostic interface for uploaded PDFs and extraction artifacts."""
 
     def save(self, filename: str, content: bytes) -> str:
         """Persist `content` and return an opaque key to pass back to this
@@ -41,6 +41,14 @@ class Storage:
         backends the file is downloaded to a cache directory first. Treat the
         returned path as read-only.
         """
+        raise NotImplementedError
+
+    def save_artifact(self, key: str, content: bytes, content_type: str) -> str:
+        """Persist non-PDF bytes and return an opaque pointer."""
+        raise NotImplementedError
+
+    def read_artifact(self, stored_key: str) -> bytes:
+        """Read artifact bytes from the opaque pointer. Do not use PDF cache."""
         raise NotImplementedError
 
     def delete(self, stored_key: str) -> None:
@@ -63,6 +71,15 @@ class LocalStorage(Storage):
 
     def ensure_local_path(self, stored_key: str) -> Path:
         return Path(stored_key)
+
+    def save_artifact(self, key: str, content: bytes, content_type: str) -> str:
+        path = self._base_dir / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return str(path)
+
+    def read_artifact(self, stored_key: str) -> bytes:
+        return Path(stored_key).read_bytes()
 
     def delete(self, stored_key: str) -> None:
         Path(stored_key).unlink(missing_ok=True)
@@ -109,6 +126,25 @@ class S3Storage(Storage):
         )
         logger.info("s3_upload_saved", bucket=self._bucket, key=key, size_bytes=len(content))
         return f"s3://{self._bucket}/{key}"
+
+    def save_artifact(self, key: str, content: bytes, content_type: str) -> str:
+        object_key = self._key(key)
+        self._client.put_object(
+            Bucket=self._bucket, Key=object_key, Body=content, ContentType=content_type
+        )
+        logger.info(
+            "s3_artifact_saved",
+            bucket=self._bucket,
+            key=object_key,
+            size_bytes=len(content),
+            content_type=content_type,
+        )
+        return f"s3://{self._bucket}/{object_key}"
+
+    def read_artifact(self, stored_key: str) -> bytes:
+        bucket, object_key = _parse_s3_uri(stored_key)
+        response = self._client.get_object(Bucket=bucket, Key=object_key)
+        return response["Body"].read()
 
     def ensure_local_path(self, stored_key: str) -> Path:
         bucket, key = _parse_s3_uri(stored_key)

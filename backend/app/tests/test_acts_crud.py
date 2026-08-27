@@ -73,6 +73,41 @@ def test_delete_act_removes_stored_file(client, admin_token):
     assert not Path(stored_path).exists()
 
 
+def test_delete_act_while_processing_is_queued_returns_409(client, admin_token):
+    _assert_delete_blocked_while_processing(client, admin_token, ProcessingJobStatus.QUEUED)
+
+
+def test_delete_act_while_processing_is_running_returns_409(client, admin_token):
+    _assert_delete_blocked_while_processing(client, admin_token, ProcessingJobStatus.RUNNING)
+
+
+def _assert_delete_blocked_while_processing(client, admin_token, status):
+    upload = client.post(
+        "/api/v1/acts/upload",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        files={"file": ("sample.pdf", VALID_PDF, "application/pdf")},
+    )
+    act_id = upload.json()["id"]
+    with SessionLocal() as db:
+        db.add(
+            ProcessingJob(
+                act_id=act_id,
+                status=status,
+                current_step="Working",
+            )
+        )
+        db.commit()
+
+    response = client.delete(
+        f"/api/v1/acts/{act_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 409
+    assert "processing is queued or running" in response.json()["detail"]
+    with SessionLocal() as db:
+        assert db.get(LegalAct, act_id) is not None
+
+
 def test_delete_referenced_act_returns_409(client, admin_token):
     with SessionLocal() as db:
         source = LegalAct(

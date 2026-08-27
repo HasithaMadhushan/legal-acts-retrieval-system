@@ -149,6 +149,12 @@ describe("frontend role and safety smoke checks", () => {
     expect(adminActDetailPage).toContain("Pending sections");
     expect(adminActDetailPage).toContain("Mapped references");
     expect(adminActDetailPage).toContain("Requested parser");
+    expect(adminActDetailPage).toContain("Latest job parser");
+    expect(adminActDetailPage).toContain("extraction_artifact.parser_name");
+    expect(adminActDetailPage).toContain("physicalPagesChip");
+    expect(adminActDetailPage).toContain("page map unknown");
+    expect(adminActDetailPage).toContain("no physical page map");
+    expect(adminActDetailPage).not.toContain("act?.parser_used");
     expect(adminActDetailPage).toContain("Extracted characters");
     expect(adminActDetailPage).toContain("Warnings");
     expect(adminActDetailPage).toContain("Errors");

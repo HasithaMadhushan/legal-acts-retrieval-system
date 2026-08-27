@@ -29,6 +29,47 @@ def test_local_storage_save_and_read_round_trip(tmp_path):
     assert local_path.read_bytes() == b"%PDF-1.4 fake content"
 
 
+def test_local_storage_save_artifact_round_trip_uses_nested_key(tmp_path):
+    local = LocalStorage(tmp_path)
+    logical_key = "act-id/extractions/job-id.schema-v1.json"
+
+    pointer = local.save_artifact(logical_key, b'{"schema_version":"1"}', "application/json")
+
+    assert pointer == str(tmp_path / logical_key)
+    assert local.read_artifact(pointer) == b'{"schema_version":"1"}'
+
+
+def test_s3_storage_save_artifact_uses_json_content_type(tmp_path):
+    mock_client = MagicMock()
+    mock_client.get_object.return_value = {"Body": MagicMock(read=lambda: b'{"ok":true}')}
+    with patch("boto3.client", return_value=mock_client):
+        s3 = S3Storage("my-bucket", prefix="acts", cache_dir=tmp_path)
+
+    pointer = s3.save_artifact("act/extractions/job.json", b'{"ok":true}', "application/json")
+
+    assert pointer == "s3://my-bucket/acts/act/extractions/job.json"
+    mock_client.put_object.assert_called_once_with(
+        Bucket="my-bucket",
+        Key="acts/act/extractions/job.json",
+        Body=b'{"ok":true}',
+        ContentType="application/json",
+    )
+    assert s3.read_artifact(pointer) == b'{"ok":true}'
+    mock_client.get_object.assert_called_once_with(
+        Bucket="my-bucket", Key="acts/act/extractions/job.json"
+    )
+
+
+def test_s3_storage_read_artifact_does_not_use_pdf_download_cache(tmp_path):
+    mock_client = MagicMock()
+    mock_client.get_object.return_value = {"Body": MagicMock(read=lambda: b"artifact-bytes")}
+    with patch("boto3.client", return_value=mock_client):
+        s3 = S3Storage("my-bucket", cache_dir=tmp_path)
+
+    assert s3.read_artifact("s3://my-bucket/doc.json") == b"artifact-bytes"
+    mock_client.download_file.assert_not_called()
+
+
 def test_local_storage_delete_removes_file(tmp_path):
     local = LocalStorage(tmp_path)
     stored_key = local.save("doc.pdf", b"content")

@@ -49,6 +49,17 @@ export interface LegalAct {
   processing_error: string | null;
   uploaded_at: string;
   updated_at: string;
+  extraction_artifact?: ExtractionArtifact | null;
+}
+
+export interface ExtractionArtifact {
+  present: boolean;
+  schema_version: string | null;
+  sha256_prefix: string | null;
+  created_at: string | null;
+  parser_name: string | null;
+  has_physical_pages: boolean | null;
+  integrity_warning: boolean;
 }
 
 export interface LegalActBrowse extends LegalAct {
