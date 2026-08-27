@@ -18,7 +18,10 @@ def test_run_migrations_creates_full_schema_from_empty_database(tmp_path, monkey
 
         engine = create_engine(database_url)
         try:
-            table_names = set(inspect(engine).get_table_names())
+            inspector = inspect(engine)
+            table_names = set(inspector.get_table_names())
+            section_columns = {column["name"] for column in inspector.get_columns("act_sections")}
+            section_indexes = {index["name"] for index in inspector.get_indexes("act_sections")}
         finally:
             engine.dispose()
     finally:
@@ -38,4 +41,16 @@ def test_run_migrations_creates_full_schema_from_empty_database(tmp_path, monkey
         "llm_extraction_cache",
         "alembic_version",
     }.issubset(table_names)
+    assert {
+        "embedding",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_dimension",
+        "embedding_source_hash",
+        "embedding_status",
+        "embedded_at",
+        "embedding_error",
+    }.issubset(section_columns)
+    assert "ix_act_sections_embedding_status_model" in section_indexes
+    assert "ix_act_sections_embedding_hnsw" not in section_indexes
     assert Path(db_path).exists()
