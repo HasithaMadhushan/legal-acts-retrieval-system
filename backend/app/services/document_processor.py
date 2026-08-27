@@ -19,12 +19,20 @@ from app.models.mixins import utc_now
 from app.models.processing_job import ProcessingJob
 from app.models.user import User
 from app.services.embedding_service import embed_text
+from app.services.extraction_artifact import (
+    ARTIFACT_SCHEMA_VERSION,
+    ArtifactPersistError,
+    artifact_logical_key,
+    build_extraction_payload,
+    delete_orphan_artifact,
+    persist_extraction_artifact,
+)
 from app.services.metadata_extractor import ExtractedMetadata, extract_metadata
-from app.services.pdf_parser.base import PdfExtractionError, PdfParser
+from app.services.pdf_parser.base import ParsedPdf, PdfExtractionError, PdfParser
 from app.services.pdf_parser.docling_parser import DoclingParser
 from app.services.pdf_parser.native_first_parser import NativeFirstPdfParser
 from app.services.pdf_parser.pdf_inspector_parser import PdfInspectorParser
-from app.services.pdf_parser.preparation import prepare_act_pages
+from app.services.pdf_parser.preparation import PreparedPages, prepare_act_pages
 from app.services.pdf_parser.pymupdf_parser import PyMuPdfParser
 from app.services.pdf_parser.quality_gated_parser import QualityGatedPdfParser
 from app.services.reference_extractor import (
@@ -335,62 +343,130 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
             }
         )
         job.summary_json = summary
-        db.commit()
+        artifact_pointer = _store_extraction_artifact(
+            act, job, parsed, prepared, warnings, summary
+        )
+        try:
+            db.commit()
+        except Exception:
+            delete_orphan_artifact(get_storage(), artifact_pointer, summary)
+            raise
+    except Exception as exc:
+        return _fail_processing_job(db, act.id, job.id, summary, exc)
+
+    return _acknowledge_completed_job(db, job, summary)
+
+
+def _acknowledge_completed_job(
+    db: Session, job: ProcessingJob, summary: dict[str, object]
+) -> ProcessingJob:
+    try:
         db.refresh(job)
         logger.info(
             "processing_job_completed",
             job_id=job.id,
-            act_id=act.id,
+            act_id=job.act_id,
             sections_created=summary["sections_created"],
             references_created=summary["references_created"],
         )
-        return job
-    except Exception as exc:
-        db.rollback()
-        error_message = str(exc) or "PDF processing failed."
-        if isinstance(exc, PdfExtractionError):
-            summary.update(
-                {
-                    "parser_used": exc.parser_name,
-                    "page_count": exc.page_count,
-                    "extracted_character_count": exc.extracted_character_count or 0,
-                    "warnings": _unique_strings(
-                        [*_as_string_list(summary.get("warnings")), *exc.warnings]
-                    ),
-                }
-            )
-        summary["errors"] = _unique_strings(
-            [*_as_string_list(summary.get("errors")), error_message]
-        )
-
-        failed_act = db.get(LegalAct, act.id)
-        failed_job = db.get(ProcessingJob, job.id)
-        if failed_act is None or failed_job is None:
-            raise
-
-        page_count = summary.get("page_count")
-        if isinstance(page_count, int):
-            failed_act.page_count = page_count
-        failed_act.parser_used = _parser_name(
-            str(summary.get("parser_used") or ParserName.UNKNOWN.value)
-        )
-        failed_act.processing_status = ProcessingStatus.FAILED
-        failed_act.processing_error = error_message
-        failed_job.status = ProcessingJobStatus.FAILED
-        failed_job.current_step = "Failed"
-        failed_job.progress_percent = 100
-        failed_job.completed_at = utc_now()
-        failed_job.error_message = error_message
-        failed_job.summary_json = summary
-        db.commit()
-        db.refresh(failed_job)
+    except Exception:
         logger.warning(
-            "processing_job_failed",
-            job_id=failed_job.id,
-            act_id=failed_act.id,
-            error=error_message,
+            "processing_job_post_commit_failed",
+            job_id=job.id,
+            act_id=job.act_id,
+            exc_info=True,
         )
-        return failed_job
+    return job
+
+
+def _fail_processing_job(
+    db: Session,
+    act_id: str,
+    job_id: str,
+    summary: dict[str, object],
+    exc: Exception,
+) -> ProcessingJob:
+    db.rollback()
+    error_message = str(exc) or "PDF processing failed."
+    if isinstance(exc, ArtifactPersistError) and exc.cleanup_warning:
+        summary["artifact_cleanup_warning"] = exc.cleanup_warning
+    if isinstance(exc, PdfExtractionError):
+        summary.update(
+            {
+                "parser_used": exc.parser_name,
+                "page_count": exc.page_count,
+                "extracted_character_count": exc.extracted_character_count or 0,
+                "warnings": _unique_strings(
+                    [*_as_string_list(summary.get("warnings")), *exc.warnings]
+                ),
+            }
+        )
+    summary["errors"] = _unique_strings(
+        [*_as_string_list(summary.get("errors")), error_message]
+    )
+
+    failed_act = db.get(LegalAct, act_id)
+    failed_job = db.get(ProcessingJob, job_id)
+    if failed_act is None or failed_job is None:
+        raise
+
+    page_count = summary.get("page_count")
+    if isinstance(page_count, int):
+        failed_act.page_count = page_count
+    failed_act.parser_used = _parser_name(
+        str(summary.get("parser_used") or ParserName.UNKNOWN.value)
+    )
+    failed_act.processing_status = ProcessingStatus.FAILED
+    failed_act.processing_error = error_message
+    failed_job.status = ProcessingJobStatus.FAILED
+    failed_job.current_step = "Failed"
+    failed_job.progress_percent = 100
+    failed_job.completed_at = utc_now()
+    failed_job.error_message = error_message
+    failed_job.summary_json = summary
+    db.commit()
+    try:
+        db.refresh(failed_job)
+    except Exception:
+        logger.warning("processing_job_failed_refresh_failed", job_id=job_id, exc_info=True)
+    logger.warning(
+        "processing_job_failed",
+        job_id=failed_job.id,
+        act_id=failed_act.id,
+        error=error_message,
+    )
+    return failed_job
+
+
+def _store_extraction_artifact(
+    act: LegalAct,
+    job: ProcessingJob,
+    parsed: ParsedPdf,
+    prepared: PreparedPages,
+    warnings: list[str],
+    summary: dict[str, object],
+) -> str:
+    created_at = utc_now()
+    payload = build_extraction_payload(
+        parsed=parsed,
+        prepared=prepared,
+        act=act,
+        job=job,
+        warnings=warnings,
+        created_at=created_at,
+    )
+    pointer, digest = persist_extraction_artifact(
+        get_storage(),
+        logical_key=artifact_logical_key(act.id, job.id),
+        payload=payload,
+    )
+    act.extraction_artifact_key = pointer
+    act.extraction_artifact_sha256 = digest
+    act.extraction_schema_version = ARTIFACT_SCHEMA_VERSION
+    act.extraction_created_at = created_at
+    summary["extraction_artifact_key"] = pointer
+    summary["extraction_artifact_sha256"] = digest
+    return pointer
 
 
 def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:

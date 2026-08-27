@@ -37,8 +37,19 @@ class LegalActBrowseRead(LegalActRead):
     last_verified_at: datetime | None
 
 
+class ExtractionArtifactRead(BaseModel):
+    present: bool
+    schema_version: str | None = None
+    sha256_prefix: str | None = None
+    created_at: datetime | None = None
+    parser_name: str | None = None
+    has_physical_pages: bool | None = None
+    integrity_warning: bool = False
+
+
 class LegalActDetail(LegalActRead):
     raw_text: str | None = None
+    extraction_artifact: ExtractionArtifactRead | None = None
 
 
 class LegalActUpdate(BaseModel):

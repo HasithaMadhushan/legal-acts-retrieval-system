@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_admin
 from app.core.config import get_settings
-from app.core.roles import ProcessingStatus, UserRole, VerificationStatus
+from app.core.logging import get_logger
+from app.core.roles import ProcessingJobStatus, ProcessingStatus, UserRole, VerificationStatus
 from app.db.session import get_db
 from app.models.act_section import ActSection
 from app.models.evaluation import EvaluationGoldReference, EvaluationRun
@@ -28,14 +29,21 @@ from app.schemas.legal_act import (
     VerificationSummaryRead,
 )
 from app.services.document_processor import create_processing_job, run_processing_job
+from app.services.extraction_artifact import (
+    collect_artifact_pointers,
+    load_extraction_artifact_view,
+)
 from app.services.storage import get_storage
 from app.services.text_cleaner import normalize_for_search
 
 router = APIRouter(prefix="/acts", tags=["acts"])
+logger = get_logger(__name__)
 
 PDF_MIME_TYPES = {"application/pdf", "application/octet-stream", ""}
 PDF_SIGNATURE = b"%PDF-"
 ACT_REFERENCED_DETAIL = "Act is referenced by other Acts and cannot be deleted."
+ACT_PROCESSING_DETAIL = "Act cannot be deleted while processing is queued or running."
+ACT_DELETE_CONFLICT = f"{ACT_REFERENCED_DETAIL} {ACT_PROCESSING_DETAIL}"
 
 
 def _validate_upload_filename(original_name: str) -> str:
@@ -180,7 +188,7 @@ def get_act(
     act_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> LegalAct:
+) -> LegalActDetail:
     act = db.get(LegalAct, act_id)
     if not act:
         raise HTTPException(status_code=404, detail="Act not found.")
@@ -189,7 +197,10 @@ def get_act(
         ProcessingStatus.VERIFIED,
     }:
         raise HTTPException(status_code=403, detail="Act is not available for this role.")
-    return act
+    detail = LegalActDetail.model_validate(act)
+    return detail.model_copy(
+        update={"extraction_artifact": load_extraction_artifact_view(get_storage(), act)}
+    )
 
 
 @router.patch("/{act_id}", response_model=LegalActRead)
@@ -214,16 +225,23 @@ def update_act(
 
 @router.delete(
     "/{act_id}",
-    responses={409: {"description": ACT_REFERENCED_DETAIL}},
+    responses={409: {"description": ACT_DELETE_CONFLICT}},
 )
 def delete_act(
     act_id: str,
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> dict:
-    act = db.get(LegalAct, act_id)
+    act = (
+        db.query(LegalAct)
+        .filter(LegalAct.id == act_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if not act:
         raise HTTPException(status_code=404, detail="Act not found.")
+    if _has_active_processing(db, act_id):
+        raise HTTPException(status_code=409, detail=ACT_PROCESSING_DETAIL)
     section_ids = [
         row[0] for row in db.query(ActSection.id).filter(ActSection.act_id == act_id)
     ]
@@ -243,7 +261,8 @@ def delete_act(
     )
     if incoming:
         raise HTTPException(status_code=409, detail=ACT_REFERENCED_DETAIL)
-    stored_key = act.stored_file_path
+    jobs = db.query(ProcessingJob).filter(ProcessingJob.act_id == act_id).all()
+    storage_keys = [act.stored_file_path, *collect_artifact_pointers(act, jobs)]
     try:
         reference_ids = [
             row[0]
@@ -276,10 +295,7 @@ def delete_act(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail=ACT_REFERENCED_DETAIL) from None
-    try:
-        get_storage().delete(stored_key)
-    except Exception:
-        pass
+    _best_effort_delete_storage(storage_keys)
     return {"detail": "Act deleted."}
 
 
@@ -371,3 +387,26 @@ def verification_summary(
             LegalReference.target_section_id.is_(None),
         ).count(),
     )
+
+
+def _has_active_processing(db: Session, act_id: str) -> bool:
+    return (
+        db.query(ProcessingJob.id)
+        .filter(
+            ProcessingJob.act_id == act_id,
+            ProcessingJob.status.in_(
+                (ProcessingJobStatus.QUEUED, ProcessingJobStatus.RUNNING)
+            ),
+        )
+        .first()
+        is not None
+    )
+
+
+def _best_effort_delete_storage(stored_keys: list[str]) -> None:
+    storage = get_storage()
+    for stored_key in stored_keys:
+        try:
+            storage.delete(stored_key)
+        except Exception:
+            logger.warning("storage_delete_failed", stored_key=stored_key)

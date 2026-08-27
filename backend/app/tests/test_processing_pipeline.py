@@ -1,11 +1,16 @@
+import json
 from pathlib import Path
 
 import fitz
 
+from app.core.roles import ProcessingJobStatus, ProcessingStatus
 from app.db.session import SessionLocal
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
+from app.services import document_processor as processor_module
+from app.services.extraction_artifact import ArtifactPersistError
+from app.services.storage import get_storage
 from app.tests.helpers import process_and_wait
 
 SAMPLE_ACT_TEXT = """TEST LEGAL ACT
@@ -53,6 +58,14 @@ def _upload_pdf(client, admin_token, content: bytes, filename: str = "act.pdf") 
 
 def _process_and_wait(client, admin_token, act_id: str) -> dict:
     return process_and_wait(client, admin_token, act_id)
+
+
+def _artifact_exists(pointer: str) -> bool:
+    try:
+        get_storage().read_artifact(pointer)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _replace_stored_path(act_id: str, stored_file_path: str) -> None:
@@ -129,6 +142,220 @@ def test_admin_can_trigger_processing_for_valid_pdf(client, admin_token):
     assert detail.json()["parser_used"] == "PYMUPDF"
 
 
+def test_successful_processing_persists_extraction_artifact(client, admin_token):
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+
+    job = _process_and_wait(client, admin_token, act["id"])
+    summary = job["summary_json"]
+    pointer = summary["extraction_artifact_key"]
+    payload = json.loads(get_storage().read_artifact(pointer))
+
+    assert job["status"] == "COMPLETED"
+    assert pointer
+    assert summary["extraction_artifact_sha256"]
+    assert payload["processing_text"]
+    assert payload["page_spans"] is not None
+    assert len(payload["page_spans"]) == summary["page_count"]
+
+    with SessionLocal() as db:
+        stored = db.get(LegalAct, act["id"])
+        assert stored is not None
+        assert stored.extraction_artifact_key == pointer
+        assert stored.extraction_artifact_sha256 == summary["extraction_artifact_sha256"]
+
+    detail = client.get(
+        f"/api/v1/acts/{act['id']}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    ).json()
+    artifact = detail["extraction_artifact"]
+    assert artifact["present"] is True
+    assert artifact["has_physical_pages"] is True
+    assert artifact["integrity_warning"] is False
+    assert artifact["parser_name"] == "PYMUPDF"
+    assert "s3://" not in json.dumps(artifact)
+    assert artifact["sha256_prefix"] == summary["extraction_artifact_sha256"][:12]
+
+
+def test_reprocess_writes_new_artifact_and_retains_the_previous_object(client, admin_token):
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+    first = _process_and_wait(client, admin_token, act["id"])
+    first_pointer = first["summary_json"]["extraction_artifact_key"]
+    second = _process_and_wait(client, admin_token, act["id"])
+    second_pointer = second["summary_json"]["extraction_artifact_key"]
+
+    assert first_pointer != second_pointer
+    get_storage().read_artifact(first_pointer)
+    get_storage().read_artifact(second_pointer)
+    with SessionLocal() as db:
+        stored = db.get(LegalAct, act["id"])
+        assert stored is not None
+        assert stored.extraction_artifact_key == second_pointer
+
+
+def test_delete_act_removes_current_and_historical_extraction_artifacts(client, admin_token):
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+    first = _process_and_wait(client, admin_token, act["id"])
+    second = _process_and_wait(client, admin_token, act["id"])
+    pointers = [
+        first["summary_json"]["extraction_artifact_key"],
+        second["summary_json"]["extraction_artifact_key"],
+    ]
+    assert all(_artifact_exists(pointer) for pointer in pointers)
+
+    deleted = client.delete(
+        f"/api/v1/acts/{act['id']}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert deleted.status_code == 200
+    assert all(not _artifact_exists(pointer) for pointer in pointers)
+
+
+def test_failed_artifact_persist_records_cleanup_warning(client, admin_token, monkeypatch):
+    def fail_persist(*args, **kwargs):
+        raise ArtifactPersistError(
+            "extraction artifact hash mismatch after write",
+            cleanup_warning="Failed to delete orphan extraction artifact: cannot delete",
+        )
+
+    monkeypatch.setattr(
+        "app.services.document_processor.persist_extraction_artifact",
+        fail_persist,
+    )
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+    job = _process_and_wait(client, admin_token, act["id"])
+    summary = job["summary_json"]
+
+    assert job["status"] == "FAILED"
+    assert "hash mismatch" in job["error_message"]
+    assert "cannot delete" in summary["artifact_cleanup_warning"]
+    assert "extraction_artifact_key" not in summary
+    with SessionLocal() as db:
+        stored = db.get(LegalAct, act["id"])
+        assert stored is not None
+        assert stored.extraction_artifact_key is None
+
+
+def _capture_persist_and_fail_completed_commit(monkeypatch):
+    original_execute = processor_module._execute_processing_job
+    original_persist = processor_module.persist_extraction_artifact
+    written: list[str] = []
+
+    def persist(*args, **kwargs):
+        pointer, digest = original_persist(*args, **kwargs)
+        written.append(pointer)
+        return pointer, digest
+
+    def execute(db, job, act_row):
+        original_commit = db.commit
+
+        def commit():
+            if job.status == ProcessingJobStatus.COMPLETED:
+                raise RuntimeError("commit failed after artifact write")
+            return original_commit()
+
+        db.commit = commit
+        return original_execute(db, job, act_row)
+
+    monkeypatch.setattr(processor_module, "persist_extraction_artifact", persist)
+    monkeypatch.setattr(processor_module, "_execute_processing_job", execute)
+    return written
+
+
+def test_commit_failure_after_artifact_write_deletes_orphan_and_keeps_previous_pointer(
+    client, admin_token, monkeypatch
+):
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+    first = _process_and_wait(client, admin_token, act["id"])
+    previous_pointer = first["summary_json"]["extraction_artifact_key"]
+    written = _capture_persist_and_fail_completed_commit(monkeypatch)
+
+    job = _process_and_wait(client, admin_token, act["id"])
+    summary = job["summary_json"]
+
+    assert job["status"] == "FAILED"
+    assert "commit failed after artifact write" in job["error_message"]
+    assert "extraction_artifact_key" not in summary
+    assert "extraction_artifact_sha256" not in summary
+    assert "artifact_cleanup_warning" not in summary
+    assert written
+    assert not _artifact_exists(written[-1])
+    assert _artifact_exists(previous_pointer)
+    with SessionLocal() as db:
+        stored = db.get(LegalAct, act["id"])
+        assert stored is not None
+        assert stored.extraction_artifact_key == previous_pointer
+
+
+def test_commit_failure_records_cleanup_warning_when_orphan_delete_fails(
+    client, admin_token, monkeypatch
+):
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+    first = _process_and_wait(client, admin_token, act["id"])
+    previous_pointer = first["summary_json"]["extraction_artifact_key"]
+    written = _capture_persist_and_fail_completed_commit(monkeypatch)
+    storage = get_storage()
+    original_delete = storage.delete
+
+    def delete(key):
+        if key != previous_pointer:
+            raise RuntimeError("cannot delete")
+        return original_delete(key)
+
+    monkeypatch.setattr(storage, "delete", delete)
+
+    job = _process_and_wait(client, admin_token, act["id"])
+    summary = job["summary_json"]
+
+    assert job["status"] == "FAILED"
+    assert "cannot delete" in summary["artifact_cleanup_warning"]
+    assert "extraction_artifact_key" not in summary
+    assert "extraction_artifact_sha256" not in summary
+    assert written
+    assert _artifact_exists(written[-1])
+    assert _artifact_exists(previous_pointer)
+    with SessionLocal() as db:
+        stored = db.get(LegalAct, act["id"])
+        assert stored is not None
+        assert stored.extraction_artifact_key == previous_pointer
+
+
+def test_refresh_failure_after_successful_commit_does_not_mark_job_failed(
+    client, admin_token, monkeypatch
+):
+    original_execute = processor_module._execute_processing_job
+
+    def execute(db, job, act_row):
+        original_commit = db.commit
+        original_refresh = db.refresh
+        success_committed = {"value": False}
+
+        def commit():
+            original_commit()
+            if job.status == ProcessingJobStatus.COMPLETED:
+                success_committed["value"] = True
+
+        def refresh(instance):
+            if success_committed["value"]:
+                raise RuntimeError("refresh failed after commit")
+            return original_refresh(instance)
+
+        db.commit = commit
+        db.refresh = refresh
+        return original_execute(db, job, act_row)
+
+    monkeypatch.setattr(processor_module, "_execute_processing_job", execute)
+    act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
+    job = _process_and_wait(client, admin_token, act["id"])
+
+    assert job["status"] == "COMPLETED"
+    assert job["summary_json"]["extraction_artifact_key"]
+    with SessionLocal() as db:
+        stored = db.get(LegalAct, act["id"])
+        assert stored is not None
+        assert stored.processing_status == ProcessingStatus.PROCESSED
+        assert stored.extraction_artifact_key
+
+
 def test_non_admin_cannot_trigger_processing(client, admin_token, lawyer_token, user_token):
     act = _upload_pdf(client, admin_token, _pdf_bytes_with_text(SAMPLE_ACT_TEXT))
 
@@ -176,6 +403,7 @@ def test_image_only_pdf_is_marked_ocr_required(client, admin_token):
     assert any("did not produce text" in warning for warning in summary["warnings"])
     assert any("native/OCR routes" in warning for warning in summary["warnings"])
     assert all("OCR extraction was attempted" not in warning for warning in summary["warnings"])
+    assert "extraction_artifact_key" not in summary
 
 
 def test_multi_page_act_records_section_page_numbers(client, admin_token):

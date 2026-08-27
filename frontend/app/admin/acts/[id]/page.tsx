@@ -39,6 +39,16 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function physicalPagesChip(hasPhysicalPages: boolean | null): string {
+  if (hasPhysicalPages === true) {
+    return " · physical pages";
+  }
+  if (hasPhysicalPages === false) {
+    return " · no physical page map";
+  }
+  return " · page map unknown";
+}
+
 function metadataFormFromAct(act: LegalAct): MetadataForm {
   return {
     title: act.title,
@@ -435,7 +445,25 @@ export default function AdminActDetailPage({ params }: { params: Promise<{ id: s
               </p>
               <p>Progress: {latestJob.progress_percent}%</p>
               <p>Requested parser: {summary?.parser_requested ?? "Unavailable"}</p>
-              <p>Parser used: {summary?.parser_used ?? act?.parser_used ?? "Unavailable"}</p>
+              <p>Latest job parser: {summary?.parser_used ?? "Unavailable"}</p>
+              {act?.extraction_artifact?.present ? (
+                <p>
+                  Extraction artifact: schema {act.extraction_artifact.schema_version ?? "unknown"}
+                  {act.extraction_artifact.parser_name
+                    ? ` · ${act.extraction_artifact.parser_name}`
+                    : ""}
+                  {act.extraction_artifact.sha256_prefix
+                    ? ` · ${act.extraction_artifact.sha256_prefix}`
+                    : ""}
+                  {physicalPagesChip(act.extraction_artifact.has_physical_pages)}
+                  {act.extraction_artifact.created_at
+                    ? ` · ${new Date(act.extraction_artifact.created_at).toLocaleString()}`
+                    : ""}
+                  {act.extraction_artifact.integrity_warning ? " · integrity warning" : ""}
+                </p>
+              ) : (
+                <p>Extraction artifact: not stored</p>
+              )}
               <p>Sections created: {summary?.sections_created ?? 0}</p>
               <p>References created: {summary?.references_created ?? 0}</p>
               {latestJob.completed_at ? (
