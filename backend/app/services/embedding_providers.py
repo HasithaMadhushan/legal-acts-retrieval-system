@@ -141,11 +141,13 @@ class SentenceTransformerProvider:
         model = self._get_model()
         tokenizer = model.tokenizer
         max_length = model.max_seq_length or 256
+        # Budget special tokens the same way encode() will: MiniLM's max length
+        # includes CLS/SEP, so truncating without them over-keeps content tokens.
         encoded = tokenizer(
             text,
             truncation=True,
             max_length=max_length,
-            add_special_tokens=False,
+            add_special_tokens=True,
         )
         return tokenizer.decode(encoded["input_ids"], skip_special_tokens=True)
 

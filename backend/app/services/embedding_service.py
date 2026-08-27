@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import math
-import os
 
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 from app.core.roles import EmbeddingStatus
 from app.models.mixins import utc_now
 from app.services.embedding_providers import (
-    DeterministicTestProvider,
     EmbeddingProvider,
     get_embedding_provider,
 )
@@ -20,12 +18,6 @@ _PROVIDER_FAILED = "Embedding provider failed"
 
 class EmbeddingError(Exception):
     """Raised when embedding generation or validation fails."""
-
-
-def _running_under_pytest() -> bool:
-    # Existing callers still import embed_text; keep unit tests network-free
-    # without changing those modules in this task.
-    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 def _optional_text(value: object | None) -> str:
@@ -89,8 +81,6 @@ def _resolve_provider(
 ) -> EmbeddingProvider:
     if provider is not None:
         return provider
-    if settings.embedding_provider == "hash-test" or _running_under_pytest():
-        return DeterministicTestProvider.from_settings(settings)
     return get_embedding_provider(settings)
 
 
@@ -104,10 +94,7 @@ class EmbeddingService:
         self._provider = _resolve_provider(provider, self._settings)
 
     def truncate_text(self, text: str) -> str:
-        truncate = getattr(self._provider, "truncate_text", None)
-        if truncate is None:
-            return text
-        return truncate(text)
+        return self._provider.truncate_text(text)
 
     def build_section_text(self, act: object, section: object) -> str:
         parts = [
@@ -134,7 +121,13 @@ class EmbeddingService:
 
     def needs_embedding(self, section: object) -> bool:
         status = getattr(section, "embedding_status", EmbeddingStatus.PENDING)
-        return status != EmbeddingStatus.READY or not self._metadata_is_current(section)
+        if status != EmbeddingStatus.READY:
+            return True
+        try:
+            return not self._metadata_is_current(section)
+        except Exception:
+            # Truncation/model load failures are handled when embedding runs.
+            return True
 
     def embed_sections(self, sections: list[object]) -> None:
         pending = [section for section in sections if self.needs_embedding(section)]
@@ -173,8 +166,8 @@ class EmbeddingService:
         )
 
     def _embed_batch(self, batch: list[object]) -> int:
-        texts = [self._truncated_section_text(section) for section in batch]
         try:
+            texts = [self._truncated_section_text(section) for section in batch]
             vectors = self._provider.embed_documents(texts)
             validated = [
                 _validated_vector(vector, self._provider.dimension) for vector in vectors

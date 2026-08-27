@@ -35,27 +35,46 @@ class _RecordingModel:
 
 
 class _WhitespaceTokenizer:
-    def __call__(self, text, truncation=True, max_length=None, add_special_tokens=False):
-        tokens = text.split()
-        if truncation and max_length is not None:
-            tokens = tokens[:max_length]
-        return {"input_ids": tokens}
-
-    def decode(self, ids, skip_special_tokens=True):
-        return " ".join(ids)
-
-
-class _PrefixingTokenizer:
-    """Each encode/decode round-trip prepends a marker, so truncation is not idempotent."""
+    """Whitespace tokenizer that reserves CLS/SEP when add_special_tokens=True."""
 
     def __call__(self, text, truncation=True, max_length=None, add_special_tokens=False):
         tokens = text.split()
+        special = 2 if add_special_tokens else 0
         if truncation and max_length is not None:
-            tokens = tokens[:max_length]
-        return {"input_ids": ["<t>"] + tokens}
+            tokens = tokens[: max(0, max_length - special)]
+        ids = (["[CLS]"] + tokens + ["[SEP]"]) if add_special_tokens else list(tokens)
+        return {"input_ids": ids}
 
     def decode(self, ids, skip_special_tokens=True):
+        if skip_special_tokens:
+            ids = [token for token in ids if token not in {"[CLS]", "[SEP]"}]
         return " ".join(ids)
+
+
+class _NonIdempotentTruncateProvider:
+    """Prepends a marker on every truncate so a second pass changes the string."""
+
+    provider_name = "hash-test"
+    model_name = "hash-test"
+
+    def __init__(self, dimension: int = 8, max_seq_length: int = 4) -> None:
+        self.dimension = dimension
+        self.max_seq_length = max_seq_length
+        self.encode_calls: list[list[str]] = []
+
+    def truncate_text(self, text: str) -> str:
+        tokens = text.split()
+        kept = tokens[: max(0, self.max_seq_length - 1)]
+        return " ".join(["<t>", *kept])
+
+    def embed_query(self, text: str) -> list[float]:
+        self.encode_calls.append([text])
+        return DeterministicTestProvider(dimension=self.dimension).embed_query(text)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.encode_calls.append(list(texts))
+        provider = DeterministicTestProvider(dimension=self.dimension)
+        return [provider.embed_query(text) for text in texts]
 
 
 class _BadVectorProvider:
@@ -64,6 +83,9 @@ class _BadVectorProvider:
         self.model_name = "hash-test"
         self.dimension = dimension
         self._vector = vector
+
+    def truncate_text(self, text: str) -> str:
+        return text
 
     def embed_query(self, text: str) -> list[float]:
         return list(self._vector)
@@ -77,12 +99,29 @@ class _ExplodingProvider:
     model_name = "hash-test"
     dimension = 384
 
+    def truncate_text(self, text: str) -> str:
+        return text
+
     def embed_query(self, text: str) -> list[float]:
         raise RuntimeError("upstream inference failed")
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         raise RuntimeError("upstream inference failed")
 
+
+class _ExplodingTruncateProvider:
+    provider_name = "hash-test"
+    model_name = "hash-test"
+    dimension = 384
+
+    def truncate_text(self, text: str) -> str:
+        raise RuntimeError("tokenizer unavailable")
+
+    def embed_query(self, text: str) -> list[float]:
+        raise AssertionError("embed_query should not run after truncate failure")
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        raise AssertionError("embed_documents should not run after truncate failure")
 
 def _act(**overrides) -> SimpleNamespace:
     values = {
@@ -459,11 +498,68 @@ def test_truncated_section_text_is_what_gets_hashed_and_embedded():
     )
 
 
-def _prefixing_sentence_transformer_provider(
+def test_embed_sections_marks_failed_when_truncate_text_raises(monkeypatch):
+    legal_text = "The High Court shall have exclusive original jurisdiction."
+    section = _section(text=legal_text)
+    service = EmbeddingService(provider=_ExplodingTruncateProvider())
+    warnings: list[dict[str, object]] = []
+
+    def capture_warning(event: str, **kwargs: object) -> None:
+        warnings.append({"event": event, **kwargs})
+
+    monkeypatch.setattr(
+        "app.services.embedding_service.logger.warning",
+        capture_warning,
+    )
+
+    with pytest.raises(EmbeddingError, match="provider") as caught:
+        service.embed_sections([section])
+
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert section.embedding_status == EmbeddingStatus.FAILED
+    assert section.embedding_error == "Embedding provider failed"
+    assert legal_text not in section.embedding_error
+    assert section.embedding is None
+    assert warnings == [
+        {
+            "event": "section_embedding_failed",
+            "section_id": "section-1",
+            "error_type": "RuntimeError",
+        }
+    ]
+
+
+def test_needs_embedding_survives_truncate_failure_then_batch_marks_failed(monkeypatch):
+    service = EmbeddingService(provider=_ExplodingTruncateProvider())
+    ready = _section(
+        embedding=[0.1] * 384,
+        embedding_provider="hash-test",
+        embedding_model="hash-test",
+        embedding_dimension=384,
+        embedding_source_hash="0" * 64,
+        embedding_status=EmbeddingStatus.READY,
+    )
+    warnings: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "app.services.embedding_service.logger.warning",
+        lambda event, **kwargs: warnings.append({"event": event, **kwargs}),
+    )
+
+    assert service.needs_embedding(ready) is True
+    with pytest.raises(EmbeddingError):
+        service.embed_sections([ready])
+    assert ready.embedding_status == EmbeddingStatus.FAILED
+    assert warnings[0]["error_type"] == "RuntimeError"
+
+
+def _sentence_transformer_provider(
     monkeypatch,
+    *,
+    tokenizer: object,
+    max_seq_length: int = 4,
 ) -> tuple[SentenceTransformerProvider, _RecordingModel]:
-    model = _RecordingModel(dimension=8, max_seq_length=4)
-    model.tokenizer = _PrefixingTokenizer()
+    model = _RecordingModel(dimension=8, max_seq_length=max_seq_length)
+    model.tokenizer = tokenizer
 
     def fake_load(model_name: str, revision: str, device: str):
         return model
@@ -482,8 +578,8 @@ def _prefixing_sentence_transformer_provider(
     return provider, model
 
 
-def test_source_hash_matches_the_truncated_string_that_is_embedded(monkeypatch):
-    provider, model = _prefixing_sentence_transformer_provider(monkeypatch)
+def test_source_hash_matches_the_truncated_string_that_is_embedded():
+    provider = _NonIdempotentTruncateProvider(dimension=8, max_seq_length=4)
     service = EmbeddingService(provider=provider)
     act = _act(title="Act", act_number=None, year=None, category=None)
     section = _section(
@@ -497,15 +593,15 @@ def test_source_hash_matches_the_truncated_string_that_is_embedded(monkeypatch):
 
     service.embed_sections([section])
 
-    assert truncated_once == "<t> Act Section 1 alpha"
+    assert truncated_once == "<t> Act Section 1"
     assert section.embedding_source_hash == hashlib.sha256(
         truncated_once.encode("utf-8")
     ).hexdigest()
-    assert model.encode_calls[0]["texts"] == [truncated_once]
+    assert provider.encode_calls[0] == [truncated_once]
 
 
-def test_embed_does_not_apply_a_second_truncation_before_encode(monkeypatch):
-    provider, model = _prefixing_sentence_transformer_provider(monkeypatch)
+def test_embed_does_not_apply_a_second_truncation_before_encode():
+    provider = _NonIdempotentTruncateProvider(dimension=8, max_seq_length=4)
     service = EmbeddingService(provider=provider)
     query = "alpha beta gamma delta epsilon zeta"
     truncated_once = provider.truncate_text(query)
@@ -513,11 +609,65 @@ def test_embed_does_not_apply_a_second_truncation_before_encode(monkeypatch):
 
     service.embed_query(query)
 
-    assert truncated_once == "<t> alpha beta gamma delta"
-    assert truncated_twice == "<t> <t> alpha beta gamma"
+    assert truncated_once == "<t> alpha beta gamma"
+    assert truncated_twice == "<t> <t> alpha beta"
     assert truncated_once != truncated_twice
-    assert model.encode_calls[0]["texts"] == [truncated_once]
-    assert truncated_twice not in model.encode_calls[0]["texts"]
+    assert provider.encode_calls[0] == [truncated_once]
+
+
+def test_sentence_transformer_truncation_reserves_special_token_budget(monkeypatch):
+    provider, _model = _sentence_transformer_provider(
+        monkeypatch,
+        tokenizer=_WhitespaceTokenizer(),
+        max_seq_length=4,
+    )
+    # max_length=4 with CLS+SEP leaves two content tokens.
+    truncated = provider.truncate_text("alpha beta gamma delta epsilon")
+
+    assert truncated == "alpha beta"
+    assert len(truncated.split()) == 2
+
+
+def test_special_token_budget_matches_encode_content_window(monkeypatch):
+    """Hash must describe content that fits after CLS/SEP consume the max length."""
+
+    class _EncodeAwareModel(_RecordingModel):
+        def encode(self, texts, **kwargs):
+            self.encode_calls.append({"texts": list(texts), **kwargs})
+            # Simulate encode() re-tokenizing with special tokens and dropping overflow.
+            kept = []
+            for text in texts:
+                tokens = text.split()
+                kept.append(" ".join(tokens[: max(0, self.max_seq_length - 2)]))
+            self.encode_calls[-1]["effective"] = kept
+            return [[0.5] * self.dimension for _ in texts]
+
+    model = _EncodeAwareModel(dimension=8, max_seq_length=4)
+    model.tokenizer = _WhitespaceTokenizer()
+
+    def fake_load(model_name: str, revision: str, device: str):
+        return model
+
+    monkeypatch.setattr(
+        "app.services.embedding_providers.load_sentence_transformer",
+        fake_load,
+    )
+    provider = SentenceTransformerProvider(
+        model_name="test-model",
+        dimension=8,
+        revision="main",
+        device="cpu",
+        batch_size=8,
+    )
+    service = EmbeddingService(provider=provider)
+    query = "alpha beta gamma delta epsilon"
+    truncated = provider.truncate_text(query)
+
+    service.embed_query(query)
+
+    assert truncated == "alpha beta"
+    assert model.encode_calls[0]["texts"] == [truncated]
+    assert model.encode_calls[0]["effective"] == [truncated]
 
 
 def test_deterministic_provider_encodes_caller_text_without_truncating():
@@ -530,12 +680,48 @@ def test_deterministic_provider_encodes_caller_text_without_truncating():
     assert provider.embed_documents([long_text])[0] == provider.embed_query(long_text)
 
 
-def test_embed_text_uses_configured_test_provider_path():
-    vector = embed_text("High Court jurisdiction over civil matters.")
+def test_embed_text_uses_configured_hash_test_provider(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "hash-test")
+    from app.core.config import get_settings
 
+    get_settings.cache_clear()
+    try:
+        vector = embed_text("High Court jurisdiction over civil matters.")
+        assert len(vector) == 384
+        assert math.sqrt(sum(component * component for component in vector)) == pytest.approx(
+            1.0
+        )
+        assert embed_text("High Court jurisdiction over civil matters.") == vector
+        assert get_settings().embedding_provider == "hash-test"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_embedding_service_respects_sentence_transformers_settings_without_pytest_override(
+    monkeypatch,
+):
+    loads: list[int] = []
+
+    def fake_load(model_name: str, revision: str, device: str):
+        loads.append(1)
+        return _RecordingModel(dimension=384)
+
+    monkeypatch.setattr(
+        "app.services.embedding_providers.load_sentence_transformer",
+        fake_load,
+    )
+    settings = Settings(
+        environment="test",
+        embedding_provider="sentence-transformers",
+        embedding_dimension=384,
+    )
+    service = EmbeddingService(settings=settings)
+
+    vector = service.embed_query("jurisdiction")
+
+    assert loads == [1]
     assert len(vector) == 384
-    assert math.sqrt(sum(component * component for component in vector)) == pytest.approx(1.0)
-    assert embed_text("High Court jurisdiction over civil matters.") == vector
 
 
 def test_cosine_similarity_of_identical_and_orthogonal_unit_vectors():

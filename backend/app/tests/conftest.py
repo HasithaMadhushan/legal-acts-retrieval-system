@@ -12,15 +12,37 @@ os.environ["AUTO_MIGRATE_ON_STARTUP"] = "false"
 # Auth fixtures log in many times per test run from a single TestClient "IP";
 # the production rate limiter is exercised separately in test_rate_limit.py.
 os.environ["RATE_LIMIT_ENABLED"] = "false"
+# Allow hash-test provider selection via fixtures (see use_hash_test_embeddings).
+os.environ["ENVIRONMENT"] = "test"
 
 import pytest
 from fastapi.testclient import TestClient
 
 import app.models  # noqa: F401 — register SQLAlchemy models for metadata
+from app.core.config import get_settings
 from app.db.base import Base
 from app.db.seed import seed_demo_users
 from app.db.session import engine
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def use_hash_test_embeddings(request, monkeypatch):
+    """Select deterministic embeddings through settings, not pytest process sniffing.
+
+    Config-unit tests construct Settings() to assert production defaults, so they
+    opt out. All other tests (including embed_text callers) use hash-test.
+    """
+    if request.fspath.basename == "test_config.py":
+        yield
+        return
+    monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "hash-test")
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)
