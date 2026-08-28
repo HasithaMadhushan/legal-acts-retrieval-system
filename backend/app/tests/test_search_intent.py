@@ -148,6 +148,33 @@ def test_exact_section_path_boost_does_not_apply_to_parent_section():
         )
         == EXACT_IDENTIFIER_BOOST
     )
+
+
+def test_exact_section_boost_honors_act_context_when_present():
+    intent = parse_search_intent("section 34 of Act No. 9 of 2023")
+
+    assert (
+        exact_identifier_boost(
+            intent,
+            result_type="SECTION",
+            act_number="9",
+            year=2023,
+            section_number="34",
+            section_path="34",
+        )
+        == EXACT_IDENTIFIER_BOOST
+    )
+    assert (
+        exact_identifier_boost(
+            intent,
+            result_type="SECTION",
+            act_number="12",
+            year=2022,
+            section_number="34",
+            section_path="34",
+        )
+        == 0.0
+    )
     assert (
         exact_identifier_boost(
             intent,

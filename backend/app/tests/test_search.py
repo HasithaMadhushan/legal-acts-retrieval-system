@@ -643,6 +643,32 @@ def test_hybrid_paginates_after_fusion_without_duplicate_identities(monkeypatch)
     assert {item.id for item in first.results}.isdisjoint({item.id for item in second.results})
 
 
+def test_hybrid_candidate_total_is_stable_across_page_depth(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    monkeypatch.setattr(get_settings(), "semantic_candidate_limit", 2)
+    with SessionLocal() as db:
+        act = _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        for index in range(3):
+            _hybrid_section(
+                db,
+                act,
+                section_id=f"stable-total-{index}",
+                heading=f"Semantic clause {index}",
+                embedding=_NEAR_VECTOR,
+            )
+        db.commit()
+
+        first = search(
+            db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all", limit=1, offset=0
+        )
+        deeper = search(
+            db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all", limit=1, offset=3
+        )
+
+    assert first.total_results == deeper.total_results
+
+
 def test_hybrid_exposes_score_components_to_admin_not_general_users(monkeypatch):
     _enable_hybrid(monkeypatch)
     _use_query_vector(monkeypatch, _QUERY_VECTOR)
@@ -734,7 +760,14 @@ def test_all_mode_reports_hybrid_when_semantic_is_ready(monkeypatch):
     _enable_hybrid(monkeypatch)
     _use_query_vector(monkeypatch, _QUERY_VECTOR)
     with SessionLocal() as db:
-        _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        act = _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        _hybrid_section(
+            db,
+            act,
+            section_id="mode-semantic-candidate",
+            heading="Tribunal competence",
+            embedding=_NEAR_VECTOR,
+        )
         db.commit()
         response = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all")
 
@@ -742,6 +775,34 @@ def test_all_mode_reports_hybrid_when_semantic_is_ready(monkeypatch):
     assert response.effective_mode == "hybrid"
     assert response.semantic_ready is True
     assert response.embedding_model == get_settings().embedding_model
+
+
+def test_all_mode_reports_keyword_when_filters_skip_semantic_branch(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        response = search(
+            db,
+            query="amend",
+            role=UserRole.LAWYER,
+            search_mode="all",
+            relationship_type=RelationshipType.AMENDS,
+        )
+
+    assert response.semantic_ready is True
+    assert response.effective_mode == "keyword"
+
+
+def test_all_mode_reports_keyword_when_semantic_candidate_pool_is_empty(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        db.commit()
+        response = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all")
+
+    assert response.semantic_ready is True
+    assert response.effective_mode == "keyword"
 
 
 def test_keyword_mode_never_claims_hybrid_when_semantic_is_ready(monkeypatch):

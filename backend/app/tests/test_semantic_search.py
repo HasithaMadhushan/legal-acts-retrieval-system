@@ -75,19 +75,21 @@ def _add_section(
     verification_status: VerificationStatus = VerificationStatus.VERIFIED,
     **overrides,
 ) -> ActSection:
-    section = ActSection(
-        id=section_id,
-        act_id=act.id,
-        section_number=section_id.split("-")[-1],
-        section_path=section_id,
-        heading=heading,
-        text=heading,
-        normalized_text=normalize_for_search(heading),
-        sort_order=len(heading),
-        verification_status=verification_status,
-        embedding=embedding,
-        **{**_ready_fields(), **overrides},
-    )
+    fields = {
+        "id": section_id,
+        "act_id": act.id,
+        "section_number": section_id.split("-")[-1],
+        "section_path": section_id,
+        "heading": heading,
+        "text": heading,
+        "normalized_text": normalize_for_search(heading),
+        "sort_order": len(heading),
+        "verification_status": verification_status,
+        "embedding": embedding,
+        **_ready_fields(),
+        **overrides,
+    }
+    section = ActSection(**fields)
     db.add(section)
     return section
 
@@ -128,6 +130,95 @@ def test_semantic_search_orders_ready_neighbours_and_excludes_pending(monkeypatc
     assert response.act_results == 0
     assert response.reference_results == 0
     assert response.results[0].score == 100.0
+
+
+def test_semantic_search_prioritizes_exact_section_bound_to_its_act(monkeypatch):
+    _use_query_vector(monkeypatch, QUERY_VECTOR)
+    with SessionLocal() as db:
+        exact_act = _add_act(
+            db,
+            title="Anti-Corruption Act",
+            act_number="9",
+            year=2023,
+        )
+        wrong_act = _add_act(
+            db,
+            title="Integrity Commission Act",
+            act_number="12",
+            year=2022,
+        )
+        _add_section(
+            db,
+            exact_act,
+            section_id="exact-section",
+            heading="Exact but distant",
+            embedding=FAR_VECTOR,
+            section_number="34",
+            section_path="34",
+        )
+        _add_section(
+            db,
+            wrong_act,
+            section_id="wrong-act-neighbour",
+            heading="Close but wrong Act",
+            embedding=NEAR_VECTOR,
+            section_number="34",
+            section_path="34",
+        )
+        db.commit()
+
+        response = search(
+            db,
+            query="section 34 of Act No. 9 of 2023",
+            role=UserRole.LAWYER,
+            search_mode="semantic",
+        )
+
+    assert response.results[0].id == "exact-section"
+    assert response.results[0].score > 100.0
+    assert next(item for item in response.results if item.id == "wrong-act-neighbour").score <= 100
+
+
+def test_semantic_search_prioritizes_sections_from_exact_act(monkeypatch):
+    _use_query_vector(monkeypatch, QUERY_VECTOR)
+    with SessionLocal() as db:
+        exact_act = _add_act(
+            db,
+            title="Anti-Corruption Act",
+            act_number="9",
+            year=2023,
+        )
+        wrong_act = _add_act(
+            db,
+            title="Integrity Commission Act",
+            act_number="12",
+            year=2022,
+        )
+        _add_section(
+            db,
+            exact_act,
+            section_id="exact-act-section",
+            heading="Exact Act but distant",
+            embedding=FAR_VECTOR,
+        )
+        _add_section(
+            db,
+            wrong_act,
+            section_id="semantic-neighbour",
+            heading="Close neighbour",
+            embedding=NEAR_VECTOR,
+        )
+        db.commit()
+
+        response = search(
+            db,
+            query="Act No. 9 of 2023",
+            role=UserRole.LAWYER,
+            search_mode="semantic",
+        )
+
+    assert response.results[0].id == "exact-act-section"
+    assert response.results[0].score > 100.0
 
 
 def test_semantic_search_excludes_failed_stale_and_mismatched_identity(monkeypatch):

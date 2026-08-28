@@ -70,9 +70,11 @@ def search(
 
         response = search_semantic_sections(db, filters, role, limit=limit, offset=offset)
         effective_mode = "semantic"
-    elif search_mode == "all" and semantic_ready:
-        response = _hybrid_search(db, filters, role, limit=limit, offset=offset)
-        effective_mode = "hybrid"
+    elif search_mode == "all" and semantic_ready and _semantic_is_applicable(filters):
+        response, used_semantic_candidates = _hybrid_search(
+            db, filters, role, limit=limit, offset=offset
+        )
+        effective_mode = "hybrid" if used_semantic_candidates else "keyword"
     else:
         response = _keyword_search(db, filters, role, limit=limit, offset=offset)
         effective_mode = "keyword"
@@ -146,12 +148,16 @@ def _hybrid_search(
     *,
     limit: int,
     offset: int,
-) -> SearchResponse:
+) -> tuple[SearchResponse, bool]:
     settings = get_settings()
-    pool_size = max(settings.semantic_candidate_limit, offset + limit)
+    # This is a bounded candidate-pool total, so keep the pool independent of
+    # page depth. A deeper offset must not change the advertised total.
+    pool_size = settings.semantic_candidate_limit
+    keyword_candidates = _keyword_candidate_pool(db, filters, role, pool_size)
+    semantic_candidates = _semantic_candidate_pool(db, filters, role, pool_size)
     fused = fuse_weighted_rrf(
-        _keyword_candidate_pool(db, filters, role, pool_size),
-        _semantic_candidate_pool(db, filters, role, pool_size),
+        keyword_candidates,
+        semantic_candidates,
         rrf_k=settings.hybrid_rrf_k,
         keyword_weight=settings.hybrid_keyword_weight,
         semantic_weight=settings.hybrid_semantic_weight,
@@ -159,16 +165,19 @@ def _hybrid_search(
     )
     include_components = role == UserRole.ADMIN
     results = [_fused_search_result(hit, include_components) for hit in fused]
-    return SearchResponse(
-        query=filters.query,
-        results=results[offset : offset + limit],
-        total_results=len(results),
-        act_results=sum(1 for item in results if item.result_type == "ACT"),
-        section_results=sum(1 for item in results if item.result_type == "SECTION"),
-        reference_results=sum(1 for item in results if item.result_type == "REFERENCE"),
-        limit=limit,
-        offset=offset,
-        disclaimer=LEGAL_DISCLAIMER,
+    return (
+        SearchResponse(
+            query=filters.query,
+            results=results[offset : offset + limit],
+            total_results=len(results),
+            act_results=sum(1 for item in results if item.result_type == "ACT"),
+            section_results=sum(1 for item in results if item.result_type == "SECTION"),
+            reference_results=sum(1 for item in results if item.result_type == "REFERENCE"),
+            limit=limit,
+            offset=offset,
+            disclaimer=LEGAL_DISCLAIMER,
+        ),
+        bool(semantic_candidates),
     )
 
 
@@ -224,11 +233,15 @@ def _keyword_candidate_pool(
 def _semantic_candidate_pool(
     db: Session, filters: _SearchFilters, role: UserRole, pool_size: int
 ) -> list[SearchResult]:
-    if not filters.has_query or filters.relationship_type or filters.mapped_status:
+    if not _semantic_is_applicable(filters):
         return []
     from app.services.semantic_search import search_semantic_sections
 
     return search_semantic_sections(db, filters, role, limit=pool_size, offset=0).results
+
+
+def _semantic_is_applicable(filters: _SearchFilters) -> bool:
+    return bool(filters.has_query and not filters.relationship_type and not filters.mapped_status)
 
 
 def _result_identifier_boost(result: SearchResult, intent: SearchIntent) -> float:

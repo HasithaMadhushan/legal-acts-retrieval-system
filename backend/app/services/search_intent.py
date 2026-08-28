@@ -95,8 +95,16 @@ def exact_identifier_boost(
     """Return a boost larger than the semantic 0–100 score scale for exact identifiers."""
     if result_type == "ACT" and _matches_exact_act(intent, act_number, year, title):
         return EXACT_IDENTIFIER_BOOST
-    if result_type == "SECTION" and _matches_exact_section(intent, section_number, section_path):
-        return EXACT_IDENTIFIER_BOOST
+    if result_type == "SECTION":
+        section_matches = _matches_exact_section(intent, section_number, section_path)
+        act_matches = _matches_exact_act(intent, act_number, year, title)
+        has_act_context = intent.has_act_identifier or bool(intent.act_title)
+        if intent.has_section_identifier and has_act_context:
+            return EXACT_IDENTIFIER_BOOST if section_matches and act_matches else 0.0
+        if intent.has_section_identifier and section_matches:
+            return EXACT_IDENTIFIER_BOOST
+        if has_act_context and act_matches:
+            return EXACT_IDENTIFIER_BOOST
     return 0.0
 
 
