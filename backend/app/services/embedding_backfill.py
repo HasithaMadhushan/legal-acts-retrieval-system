@@ -195,7 +195,14 @@ def _process_batch(
     if options.dry_run:
         counters.processed += len(to_embed)
         return last_consumed_id == batch[-1].id, last_consumed_id
-    _embed_and_commit(db, service, to_embed, options.max_retries, counters)
+    _embed_and_commit(
+        db,
+        service,
+        to_embed,
+        options.max_retries,
+        counters,
+        force=options.force,
+    )
     return last_consumed_id == batch[-1].id, last_consumed_id
 
 
@@ -205,26 +212,37 @@ def _embed_and_commit(
     batch: list[ActSection],
     max_retries: int,
     counters: _Counters,
+    *,
+    force: bool,
 ) -> None:
     try:
-        _embed_with_retries(service, batch, max_retries)
+        _embed_with_retries(service, batch, max_retries, force=force)
         counters.processed += len(batch)
         db.commit()
     except EmbeddingError:
+        counters.processed += sum(
+            1 for section in batch if not service.needs_embedding(section)
+        )
+        counters.failed += sum(
+            1
+            for section in batch
+            if section.embedding_status == EmbeddingStatus.FAILED
+        )
         db.commit()
-        counters.failed += len(batch)
 
 
 def _embed_with_retries(
     service: EmbeddingService,
     batch: list[ActSection],
     max_retries: int,
+    *,
+    force: bool,
 ) -> None:
     attempts = max(1, max_retries)
     last_error: EmbeddingError | None = None
     for _ in range(attempts):
         try:
-            service.embed_sections(batch)
+            service.embed_sections(batch, force=force)
             return
         except EmbeddingError as exc:
             last_error = exc

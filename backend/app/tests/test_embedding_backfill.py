@@ -3,7 +3,9 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.roles import EmbeddingStatus, ProcessingStatus
 from app.db.backfill_embeddings import main as backfill_main
 from app.db.session import SessionLocal
@@ -84,6 +86,19 @@ class _FlakyThenOkProvider:
         if self.calls == 1:
             raise RuntimeError("transient inference failure")
         return self._inner.embed_documents(texts)
+
+
+class _CountingProvider(DeterministicTestProvider):
+    def __init__(self) -> None:
+        super().__init__(dimension=DIMENSION)
+        self.document_calls = 0
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.document_calls += 1
+        vectors = super().embed_documents(texts)
+        for vector in vectors:
+            vector[0] += self.document_calls / 100
+        return vectors
 
 
 def _service(provider=None) -> EmbeddingService:
@@ -399,6 +414,37 @@ def test_failed_batch_does_not_block_later_batches():
     assert "boom-token" not in (_reload("section-2").embedding_error or "")
 
 
+def test_partial_inner_batch_failure_counts_only_observed_outcomes():
+    settings = get_settings().model_copy(update={"embedding_batch_size": 1})
+    service = EmbeddingService(
+        provider=_SelectiveFailProvider("boom-token"),
+        settings=settings,
+    )
+    with SessionLocal() as db:
+        act = _seed_act(db)
+        _add_section(db, act, section_id="section-partial-1", text="Safe first clause.")
+        _add_section(
+            db,
+            act,
+            section_id="section-partial-2",
+            text="Contains boom-token for failure.",
+        )
+        _add_section(db, act, section_id="section-partial-3", text="Unattempted clause.")
+        db.commit()
+
+        result = run_backfill(
+            db,
+            options=BackfillOptions(batch_size=3, max_retries=1),
+            embedding_service=service,
+        )
+
+    assert result.processed == 1
+    assert result.failed == 1
+    assert _reload("section-partial-1").embedding_status == EmbeddingStatus.READY
+    assert _reload("section-partial-2").embedding_status == EmbeddingStatus.FAILED
+    assert _reload("section-partial-3").embedding_status == EmbeddingStatus.PENDING
+
+
 def test_transient_batch_failure_is_retried():
     provider = _FlakyThenOkProvider()
     with SessionLocal() as db:
@@ -522,18 +568,25 @@ def test_limit_mid_batch_does_not_skip_trailing_rows():
 
 
 def test_force_reembeds_current_ready_rows():
-    service = _service()
+    provider = _CountingProvider()
+    service = _service(provider)
     with SessionLocal() as db:
         act = _seed_act(db)
         pending = _add_section(db, act, section_id="section-force", text="Force refresh clause.")
-        ready_fields = _current_ready_fields(service, pending)
-        pending.embedding = ready_fields["embedding"]
-        pending.embedding_provider = ready_fields["embedding_provider"]
-        pending.embedding_model = ready_fields["embedding_model"]
-        pending.embedding_dimension = ready_fields["embedding_dimension"]
-        pending.embedding_source_hash = ready_fields["embedding_source_hash"]
-        pending.embedding_status = EmbeddingStatus.READY
+        service.embed_sections([pending])
         db.commit()
+        current = (
+            db.query(ActSection)
+            .options(selectinload(ActSection.act))
+            .filter(ActSection.id == pending.id)
+            .one()
+        )
+        current.embedding_source_hash = service.source_hash(
+            service.truncate_text(service.build_section_text(current.act, current))
+        )
+        db.commit()
+        assert service.needs_embedding(current) is False
+        original_embedding = list(current.embedding)
 
         result = run_backfill(
             db,
@@ -543,8 +596,9 @@ def test_force_reembeds_current_ready_rows():
 
     loaded = _reload("section-force")
     assert result.processed == 1
+    assert provider.document_calls == 2
     assert loaded.embedding_status == EmbeddingStatus.READY
-    assert loaded.embedding != [0.25] * DIMENSION
+    assert loaded.embedding != original_embedding
 
 
 def test_postgres_row_lock_uses_skip_locked():

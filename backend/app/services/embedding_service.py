@@ -129,8 +129,10 @@ class EmbeddingService:
             # Truncation/model load failures are handled when embedding runs.
             return True
 
-    def embed_sections(self, sections: list[object]) -> None:
-        pending = [section for section in sections if self.needs_embedding(section)]
+    def embed_sections(self, sections: list[object], *, force: bool = False) -> None:
+        pending = list(sections) if force else [
+            section for section in sections if self.needs_embedding(section)
+        ]
         if not pending:
             self._log_completion(embedded=0, skipped=len(sections))
             return
