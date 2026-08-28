@@ -299,6 +299,18 @@ def test_fulltext_condition_targets_the_search_vector_column_with_bound_query():
     assert compiled.params == {"fts_query": "gaming levy"}
 
 
+def test_semantic_mode_returns_only_ready_sections_not_keyword_acts():
+    _create_search_fixture()
+    with SessionLocal() as db:
+        semantic = search(db, query="Judicature Act", role=UserRole.LAWYER, search_mode="semantic")
+        keyword = search(db, query="Judicature Act", role=UserRole.LAWYER)
+
+    assert semantic.act_results == 0
+    assert semantic.reference_results == 0
+    assert semantic.total_results == 0
+    assert keyword.act_results >= 1
+
+
 def test_search_uses_fulltext_condition_when_postgres_is_simulated(monkeypatch):
     """Forces the Postgres branch (via monkeypatch, since the test DB is
     SQLite) and confirms `search()` still runs end-to-end without raising --

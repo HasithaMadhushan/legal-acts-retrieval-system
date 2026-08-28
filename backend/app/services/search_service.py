@@ -50,7 +50,9 @@ def search(
     )
 
     if search_mode == "semantic":
-        return _semantic_results(db, filters, role, limit=limit, offset=offset)
+        from app.services.semantic_search import search_semantic_sections
+
+        return search_semantic_sections(db, filters, role, limit=limit, offset=offset)
 
     fetch_limit = offset + limit
     results: list[SearchResult] = []
@@ -279,60 +281,6 @@ def _reference_results(
             )
         )
     return total, results
-
-
-def _semantic_results(
-    db: Session,
-    filters: _SearchFilters,
-    role: UserRole,
-    *,
-    limit: int,
-    offset: int,
-) -> SearchResponse:
-    from app.services.embedding_service import cosine_similarity, embed_text
-
-    query = _apply_section_visibility(db.query(ActSection).join(LegalAct), role)
-    query = _apply_joined_act_filters(query, filters, role)
-    if filters.verification_status and role != UserRole.GENERAL_USER:
-        query = query.filter(ActSection.verification_status == filters.verification_status)
-    sections = query.filter(ActSection.embedding.is_not(None)).all()
-    query_vector = embed_text(filters.query)
-    scored: list[SearchResult] = []
-    for section in sections:
-        if not section.embedding:
-            continue
-        score = cosine_similarity(query_vector, section.embedding)
-        scored.append(
-            SearchResult(
-                result_type="SECTION",
-                id=section.id,
-                act_id=section.act_id,
-                section_id=section.id,
-                title=section.act.title,
-                act_number=section.act.act_number,
-                year=section.act.year,
-                category=section.act.category,
-                processing_status=section.act.processing_status,
-                section_number=section.section_number,
-                section_heading=section.heading,
-                snippet=_snippet(section.text, filters.query),
-                verification_status=section.verification_status,
-                score=round(max(score, 0.0) * 100, 2),
-            )
-        )
-    scored.sort(key=lambda item: (-item.score, item.title, item.id))
-    paged = scored[offset : offset + limit]
-    return SearchResponse(
-        query=filters.query,
-        results=paged,
-        total_results=len(scored),
-        act_results=0,
-        section_results=len(scored),
-        reference_results=0,
-        limit=limit,
-        offset=offset,
-        disclaimer=LEGAL_DISCLAIMER,
-    )
 
 
 def _is_postgres(db: Session) -> bool:
