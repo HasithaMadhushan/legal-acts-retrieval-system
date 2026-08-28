@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.config import get_settings
 from app.core.roles import (
     EmbeddingStatus,
     ProcessingStatus,
@@ -664,3 +665,170 @@ def test_hybrid_exposes_score_components_to_admin_not_general_users(monkeypatch)
     assert "keyword_rank" in admin.results[0].score_components
     assert "semantic_rank" in admin.results[0].score_components
     assert all(item.score_components is None for item in public.results)
+
+
+def test_search_response_schema_includes_requested_and_effective_mode():
+    from app.core.config import LEGAL_DISCLAIMER
+    from app.schemas.search import SearchResponse
+
+    payload = SearchResponse(
+        query="jurisdiction",
+        results=[],
+        total_results=0,
+        act_results=0,
+        section_results=0,
+        reference_results=0,
+        limit=25,
+        offset=0,
+        disclaimer=LEGAL_DISCLAIMER,
+        requested_mode="all",
+        effective_mode="hybrid",
+        embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+        semantic_ready=True,
+    )
+    dumped = payload.model_dump()
+
+    assert dumped["query"] == "jurisdiction"
+    assert dumped["requested_mode"] == "all"
+    assert dumped["effective_mode"] == "hybrid"
+    assert dumped["embedding_model"] == "sentence-transformers/all-MiniLM-L6-v2"
+    assert dumped["semantic_ready"] is True
+
+
+def test_search_response_keeps_legacy_fields_when_mode_metadata_is_omitted():
+    from app.core.config import LEGAL_DISCLAIMER
+    from app.schemas.search import SearchResponse
+
+    dumped = SearchResponse(
+        query="levy",
+        results=[],
+        total_results=0,
+        act_results=0,
+        section_results=0,
+        reference_results=0,
+        limit=10,
+        offset=0,
+        disclaimer=LEGAL_DISCLAIMER,
+    ).model_dump()
+
+    assert dumped["query"] == "levy"
+    assert dumped["results"] == []
+    assert dumped["total_results"] == 0
+    assert dumped["disclaimer"] == LEGAL_DISCLAIMER
+    assert dumped["requested_mode"] == "all"
+    assert dumped["effective_mode"] == "keyword"
+    assert dumped["semantic_ready"] is False
+
+
+def test_all_mode_reports_keyword_not_hybrid_when_semantic_is_disabled():
+    with SessionLocal() as db:
+        response = search(db, query="Judicature Act", role=UserRole.LAWYER, search_mode="all")
+
+    assert response.requested_mode == "all"
+    assert response.effective_mode == "keyword"
+    assert response.semantic_ready is False
+    assert response.embedding_model == get_settings().embedding_model
+
+
+def test_all_mode_reports_hybrid_when_semantic_is_ready(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        db.commit()
+        response = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all")
+
+    assert response.requested_mode == "all"
+    assert response.effective_mode == "hybrid"
+    assert response.semantic_ready is True
+    assert response.embedding_model == get_settings().embedding_model
+
+
+def test_keyword_mode_never_claims_hybrid_when_semantic_is_ready(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        db.commit()
+        response = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="keyword")
+
+    assert response.requested_mode == "keyword"
+    assert response.effective_mode == "keyword"
+    assert response.semantic_ready is True
+
+
+def test_semantic_mode_reports_semantic_effective_mode_when_ready(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        act = _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        _hybrid_section(
+            db,
+            act,
+            section_id="section-near",
+            heading="Tribunal competence",
+            embedding=_NEAR_VECTOR,
+        )
+        db.commit()
+        response = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="semantic")
+
+    assert response.requested_mode == "semantic"
+    assert response.effective_mode == "semantic"
+    assert response.semantic_ready is True
+
+
+def test_all_mode_reports_keyword_when_semantic_is_enabled_but_not_ready(monkeypatch):
+    monkeypatch.setattr(get_settings(), "semantic_search_enabled", True)
+    with SessionLocal() as db:
+        response = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all")
+
+    assert response.requested_mode == "all"
+    assert response.effective_mode == "keyword"
+    assert response.semantic_ready is False
+    assert response.embedding_model == get_settings().embedding_model
+
+
+def test_search_endpoint_includes_mode_metadata_without_dropping_legacy_fields(client, user_token):
+    response = client.get(
+        "/api/v1/search",
+        params={"q": "jurisdiction", "search_mode": "all"},
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["query"] == "jurisdiction"
+    assert "results" in body
+    assert "total_results" in body
+    assert "disclaimer" in body
+    assert body["requested_mode"] == "all"
+    assert body["effective_mode"] == "keyword"
+    assert body["semantic_ready"] is False
+    assert body["embedding_model"] == get_settings().embedding_model
+
+
+def test_semantic_only_request_is_rejected_when_disabled(client, user_token):
+    from app.schemas.search import SEMANTIC_SEARCH_DISABLED
+
+    response = client.get(
+        "/api/v1/search",
+        params={"q": "jurisdiction", "search_mode": "semantic"},
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == SEMANTIC_SEARCH_DISABLED
+
+
+def test_semantic_only_request_is_rejected_when_not_ready(client, user_token, monkeypatch):
+    from app.schemas.search import SEMANTIC_SEARCH_NOT_READY
+
+    monkeypatch.setattr(get_settings(), "semantic_search_enabled", True)
+    response = client.get(
+        "/api/v1/search",
+        params={"q": "jurisdiction", "search_mode": "semantic"},
+        headers={"Authorization": f"Bearer {user_token}"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == SEMANTIC_SEARCH_NOT_READY

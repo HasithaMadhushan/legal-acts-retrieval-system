@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.search import (
     SEMANTIC_SEARCH_DISABLED,
     SEMANTIC_SEARCH_NOT_READY,
+    SearchRequestedMode,
     SearchResponse,
     SuggestResponse,
 )
@@ -39,7 +40,7 @@ def search_endpoint(
     relationship_type: RelationshipType | None = None,
     verification_status: VerificationStatus | None = None,
     mapped_status: Literal["mapped", "unresolved"] | None = None,
-    search_mode: Literal["all", "keyword", "semantic"] = "all",
+    search_mode: SearchRequestedMode = "all",
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),

@@ -1,6 +1,11 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 from app.core.roles import ProcessingStatus, RelationshipType, VerificationStatus
+
+SearchRequestedMode = Literal["all", "keyword", "semantic"]
+SearchEffectiveMode = Literal["keyword", "semantic", "hybrid"]
 
 SEMANTIC_SEARCH_DISABLED = "Semantic search is not enabled. Use Keyword or All methods."
 SEMANTIC_SEARCH_NOT_READY = "Semantic search is enabled but not ready. Use Keyword or All methods."
@@ -41,6 +46,10 @@ class SearchResponse(BaseModel):
     limit: int
     offset: int
     disclaimer: str
+    requested_mode: SearchRequestedMode = "all"
+    effective_mode: SearchEffectiveMode = "keyword"
+    embedding_model: str | None = None
+    semantic_ready: bool = False
 
 
 class SuggestResponse(BaseModel):

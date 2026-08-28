@@ -6,7 +6,12 @@ from app.core.roles import ProcessingStatus, RelationshipType, UserRole, Verific
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
-from app.schemas.search import SearchResponse, SearchResult
+from app.schemas.search import (
+    SearchEffectiveMode,
+    SearchRequestedMode,
+    SearchResponse,
+    SearchResult,
+)
 from app.services import semantic_readiness
 from app.services.rank_fusion import FusedHit, fuse_weighted_rrf
 from app.services.search_intent import (
@@ -33,7 +38,7 @@ def search(
     relationship_type: RelationshipType | None = None,
     verification_status: VerificationStatus | None = None,
     mapped_status: str | None = None,
-    search_mode: str = "all",
+    search_mode: SearchRequestedMode = "all",
     limit: int = 25,
     offset: int = 0,
 ) -> SearchResponse:
@@ -58,15 +63,20 @@ def search(
         mapped_status=mapped_status,
     )
 
+    semantic_ready = _hybrid_is_ready(db)
+    effective_mode: SearchEffectiveMode
     if search_mode == "semantic":
         from app.services.semantic_search import search_semantic_sections
 
-        return search_semantic_sections(db, filters, role, limit=limit, offset=offset)
-
-    if search_mode == "all" and _hybrid_is_ready(db):
-        return _hybrid_search(db, filters, role, limit=limit, offset=offset)
-
-    return _keyword_search(db, filters, role, limit=limit, offset=offset)
+        response = search_semantic_sections(db, filters, role, limit=limit, offset=offset)
+        effective_mode = "semantic"
+    elif search_mode == "all" and semantic_ready:
+        response = _hybrid_search(db, filters, role, limit=limit, offset=offset)
+        effective_mode = "hybrid"
+    else:
+        response = _keyword_search(db, filters, role, limit=limit, offset=offset)
+        effective_mode = "keyword"
+    return _with_mode_metadata(response, search_mode, effective_mode, semantic_ready)
 
 
 class _SearchFilters:
@@ -159,6 +169,22 @@ def _hybrid_search(
         limit=limit,
         offset=offset,
         disclaimer=LEGAL_DISCLAIMER,
+    )
+
+
+def _with_mode_metadata(
+    response: SearchResponse,
+    requested_mode: SearchRequestedMode,
+    effective_mode: SearchEffectiveMode,
+    semantic_ready: bool,
+) -> SearchResponse:
+    return response.model_copy(
+        update={
+            "requested_mode": requested_mode,
+            "effective_mode": effective_mode,
+            "embedding_model": get_settings().embedding_model,
+            "semantic_ready": semantic_ready,
+        }
     )
 
 

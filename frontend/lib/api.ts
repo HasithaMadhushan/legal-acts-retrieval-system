@@ -43,6 +43,19 @@ export class ApiError extends Error {
   }
 }
 
+export function searchErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status === 400) {
+    return "Semantic search is not enabled yet. Use Keyword or All methods.";
+  }
+  if (err instanceof ApiError && err.status === 503) {
+    return "Semantic search is enabled but not ready. Use Keyword or All methods.";
+  }
+  if (err instanceof ApiError && err.status === 401) {
+    return "Session expired — sign in again";
+  }
+  return err instanceof Error ? err.message : "Search failed. Login may be required.";
+}
+
 const ME_TTL_MS = 5 * 60 * 1000;
 let meCache: { at: number; user: User & { disclaimer: string } } | null = null;
 

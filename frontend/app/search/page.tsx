@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -14,20 +13,10 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { SearchResults } from "@/components/search-results";
-import { ApiError, search } from "@/lib/api";
+import { search, searchErrorMessage } from "@/lib/api";
 import { containsAdviceIntent } from "@/lib/auth";
-import type { SearchResponse } from "@/lib/types";
+import { describeSearchMode, type SearchResponse } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
-
-function searchErrorMessage(err: unknown): string {
-  if (err instanceof ApiError && err.status === 400) {
-    return "Semantic search is not enabled yet. Use Keyword or All methods.";
-  }
-  if (err instanceof ApiError && err.status === 401) {
-    return "Session expired — sign in again";
-  }
-  return err instanceof Error ? err.message : "Search failed. Login may be required.";
-}
 
 export default function SearchPage() {
   return (
@@ -249,7 +238,10 @@ function SearchForm() {
 
       {response ? (
         <p className="text-sm text-muted-foreground">
-          Showing {rangeStart}–{rangeEnd} of {response.total_results} · ranked by section match
+          Showing {rangeStart}–{rangeEnd} of {response.total_results} · {describeSearchMode(response)}
+          {response.semantic_ready && response.embedding_model
+            ? ` · ${response.embedding_model}`
+            : ""}
         </p>
       ) : null}
 
