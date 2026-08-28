@@ -12,7 +12,15 @@ from app.services.embedding_backfill import BackfillOptions, BackfillResult, run
 def parse_args(argv: list[str] | None = None) -> BackfillOptions:
     parser = argparse.ArgumentParser(description="Resumable embedding backfill for Act sections")
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Accepted for CLI compatibility; backfill is already idempotent. "
+            "Re-running without this flag also continues from remaining eligible "
+            "sections after committed batches."
+        ),
+    )
     parser.add_argument("--model", type=str, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")

@@ -122,8 +122,13 @@ def _run_batches(
         batch = _fetch_batch(db, options, last_id)
         if not batch:
             break
-        last_id = batch[-1].id
-        _process_batch(db, service, options, batch, counters)
+        batch_fully_consumed, last_consumed_id = _process_batch(
+            db, service, options, batch, counters
+        )
+        if last_consumed_id is not None:
+            last_id = last_consumed_id
+        if not batch_fully_consumed:
+            break
         logger.info(
             "embedding_backfill_batch",
             processed=counters.processed,
@@ -171,40 +176,27 @@ def _process_batch(
     options: BackfillOptions,
     batch: list[ActSection],
     counters: _Counters,
-) -> None:
-    to_embed, skipped = _partition_batch(service, batch, options.force)
-    counters.skipped += skipped
-    to_embed = _apply_budget(to_embed, counters)
+) -> tuple[bool, str | None]:
+    to_embed: list[ActSection] = []
+    last_consumed_id: str | None = None
+    for section in batch:
+        if options.force or service.needs_embedding(section):
+            if _budget_exhausted(counters.budget):
+                break
+            to_embed.append(section)
+            if counters.budget is not None:
+                counters.budget -= 1
+            last_consumed_id = section.id
+        else:
+            counters.skipped += 1
+            last_consumed_id = section.id
     if not to_embed:
-        return
+        return last_consumed_id == batch[-1].id, last_consumed_id
     if options.dry_run:
         counters.processed += len(to_embed)
-        return
+        return last_consumed_id == batch[-1].id, last_consumed_id
     _embed_and_commit(db, service, to_embed, options.max_retries, counters)
-
-
-def _partition_batch(
-    service: EmbeddingService,
-    batch: list[ActSection],
-    force: bool,
-) -> tuple[list[ActSection], int]:
-    to_embed: list[ActSection] = []
-    skipped = 0
-    for section in batch:
-        if force or service.needs_embedding(section):
-            to_embed.append(section)
-        else:
-            skipped += 1
-    return to_embed, skipped
-
-
-def _apply_budget(to_embed: list[ActSection], counters: _Counters) -> list[ActSection]:
-    if counters.budget is None:
-        return to_embed
-    allowed = min(len(to_embed), counters.budget)
-    selected = to_embed[:allowed]
-    counters.budget -= allowed
-    return selected
+    return last_consumed_id == batch[-1].id, last_consumed_id
 
 
 def _embed_and_commit(

@@ -488,6 +488,39 @@ def test_limit_stops_after_requested_number_of_embeddings():
     assert statuses.count(EmbeddingStatus.PENDING) == 2
 
 
+def test_limit_mid_batch_does_not_skip_trailing_rows():
+    service = _service()
+    section_ids = [f"section-mid-{index}" for index in range(1, 6)]
+    with SessionLocal() as db:
+        act = _seed_act(db)
+        for index, section_id in enumerate(section_ids, start=1):
+            _add_section(
+                db,
+                act,
+                section_id=section_id,
+                text=f"Mid-batch limit clause {index}.",
+            )
+        db.commit()
+
+        first = run_backfill(
+            db,
+            options=BackfillOptions(batch_size=3, limit=2),
+            embedding_service=service,
+        )
+        second = run_backfill(
+            db,
+            options=BackfillOptions(batch_size=3),
+            embedding_service=service,
+        )
+
+    statuses = [_reload(section_id).embedding_status for section_id in section_ids]
+    assert first.processed == 2
+    assert first.remaining == 3
+    assert second.processed == 3
+    assert second.remaining == 0
+    assert statuses == [EmbeddingStatus.READY] * len(section_ids)
+
+
 def test_force_reembeds_current_ready_rows():
     service = _service()
     with SessionLocal() as db:
