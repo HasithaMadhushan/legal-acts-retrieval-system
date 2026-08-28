@@ -78,7 +78,11 @@ def probe_semantic_readiness(
 def _probe(db: Session, settings: Settings) -> SemanticReadiness:
     dialect, vector_extension, column_dimension = inspect_database_semantic_schema(db)
     pending_count, failed_count, stale_count = _status_counts(db)
-    provider_ready, provider_reason = check_provider_readiness(settings)
+    # Avoid MiniLM load on every /health while semantic serving is disabled.
+    if settings.semantic_search_enabled:
+        provider_ready, provider_reason = check_provider_readiness(settings)
+    else:
+        provider_ready, provider_reason = True, None
     reasons = _readiness_reasons(
         dialect=dialect,
         vector_extension=vector_extension,
@@ -188,7 +192,7 @@ def _readiness_reasons(
         reasons.append("Semantic search requires PostgreSQL")
     elif not vector_extension:
         reasons.append("PostgreSQL vector extension is not installed")
-    if column_dimension is None:
+    elif column_dimension is None:
         reasons.append("Embedding column dimension is unavailable")
     elif column_dimension != configured_dimension:
         reasons.append(
