@@ -1,4 +1,4 @@
-from sqlalchemy import String, cast, or_, text
+from sqlalchemy import String, and_, cast, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.config import LEGAL_DISCLAIMER
@@ -7,7 +7,7 @@ from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
 from app.schemas.search import SearchResponse, SearchResult
-from app.services.reference_normalizer import normalize_relationship_type
+from app.services.search_intent import SearchIntent, exact_identifier_boost, parse_search_intent
 from app.services.text_cleaner import normalize_for_search
 
 MAX_QUERY_LENGTH = 200
@@ -37,9 +37,11 @@ def search(
     offset = max(offset, 0)
 
     normalized_query = normalize_for_search(query)
+    intent = parse_search_intent(query)
     filters = _SearchFilters(
         query=query,
         normalized_query=normalized_query,
+        intent=intent,
         year=year,
         act_number=str(act_number).strip() if act_number else None,
         category=category.strip() if category else None,
@@ -88,6 +90,7 @@ class _SearchFilters:
         *,
         query: str,
         normalized_query: str,
+        intent: SearchIntent,
         year: int | None,
         act_number: str | None,
         category: str | None,
@@ -98,6 +101,7 @@ class _SearchFilters:
     ) -> None:
         self.query = query
         self.normalized_query = normalized_query
+        self.intent = intent
         self.raw_like = f"%{query}%"
         self.like = f"%{normalized_query}%"
         self.year = year
@@ -107,7 +111,7 @@ class _SearchFilters:
         self.relationship_type = relationship_type
         self.verification_status = verification_status
         self.mapped_status = mapped_status
-        self.query_relationship = normalize_relationship_type(normalized_query)
+        self.query_relationship = intent.relationship_type
 
     @property
     def has_query(self) -> bool:
@@ -135,6 +139,7 @@ def _act_results(
             conditions.append(_fulltext_condition("legal_acts", filters.query))
         else:
             conditions.append(LegalAct.raw_text.ilike(filters.raw_like))
+        conditions.extend(_exact_act_conditions(filters))
         query = query.filter(or_(*conditions))
     total = query.count()
     results: list[SearchResult] = []
@@ -186,6 +191,7 @@ def _section_results(
             conditions.append(_fulltext_condition("act_sections", filters.query))
         else:
             conditions.append(ActSection.normalized_text.ilike(filters.like))
+        conditions.extend(_exact_section_conditions(filters))
         query = query.filter(or_(*conditions))
     total = query.count()
     results: list[SearchResult] = []
@@ -247,6 +253,7 @@ def _reference_results(
         ]
         if filters.query_relationship:
             conditions.append(LegalReference.relationship_type == filters.query_relationship)
+        conditions.extend(_exact_reference_conditions(filters))
         query = query.filter(or_(*conditions))
     total = query.count()
     results: list[SearchResult] = []
@@ -381,6 +388,13 @@ def _act_score(act: LegalAct, filters: _SearchFilters, role: UserRole) -> float:
         score += 0.3
     elif role != UserRole.ADMIN and act.processing_status == ProcessingStatus.PROCESSED:
         score += 0.15
+    score += exact_identifier_boost(
+        filters.intent,
+        result_type="ACT",
+        act_number=act.act_number,
+        year=act.year,
+        title=act.title,
+    )
     return score
 
 
@@ -400,6 +414,15 @@ def _section_score(section: ActSection, filters: _SearchFilters, role: UserRole)
             score += 1.2
     if section.verification_status == VerificationStatus.VERIFIED:
         score += 0.4 if role != UserRole.ADMIN else 0.2
+    score += exact_identifier_boost(
+        filters.intent,
+        result_type="SECTION",
+        act_number=section.act.act_number,
+        year=section.act.year,
+        title=section.act.title,
+        section_number=section.section_number,
+        section_path=section.section_path,
+    )
     return score
 
 
@@ -432,6 +455,50 @@ def _reference_score(reference: LegalReference, filters: _SearchFilters, role: U
     if reference.target_act_id or reference.target_section_id:
         score += 0.2
     return score
+
+
+def _exact_act_conditions(filters: _SearchFilters):
+    intent = filters.intent
+    conditions = []
+    if intent.has_act_identifier:
+        conditions.append(
+            and_(LegalAct.act_number == intent.act_number, LegalAct.year == intent.act_year)
+        )
+    elif intent.act_number:
+        conditions.append(LegalAct.act_number == intent.act_number)
+    if intent.act_title:
+        conditions.append(LegalAct.normalized_title == intent.act_title)
+    return conditions
+
+
+def _exact_section_conditions(filters: _SearchFilters):
+    intent = filters.intent
+    if not intent.has_section_identifier:
+        return []
+    conditions = []
+    if intent.section_path:
+        conditions.append(ActSection.section_path == intent.section_path)
+        conditions.append(ActSection.section_number == intent.section_path)
+    if intent.section_number and intent.section_number != intent.section_path:
+        conditions.append(ActSection.section_number == intent.section_number)
+        conditions.append(ActSection.section_path == intent.section_number)
+    return conditions
+
+
+def _exact_reference_conditions(filters: _SearchFilters):
+    intent = filters.intent
+    conditions = []
+    if intent.has_act_identifier:
+        conditions.append(
+            and_(
+                LegalReference.target_act_number == intent.act_number,
+                LegalReference.target_act_year == intent.act_year,
+            )
+        )
+    if intent.section_path:
+        conditions.append(LegalReference.target_section_path == intent.section_path)
+        conditions.append(LegalReference.target_section_number == intent.section_path)
+    return conditions
 
 
 def _snippet(text: str, query: str, width: int = 220) -> str:
