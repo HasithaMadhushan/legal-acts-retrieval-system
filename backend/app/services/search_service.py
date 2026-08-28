@@ -1,13 +1,20 @@
 from sqlalchemy import String, and_, cast, or_, text
 from sqlalchemy.orm import Session
 
-from app.core.config import LEGAL_DISCLAIMER
+from app.core.config import LEGAL_DISCLAIMER, get_settings
 from app.core.roles import ProcessingStatus, RelationshipType, UserRole, VerificationStatus
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
 from app.schemas.search import SearchResponse, SearchResult
-from app.services.search_intent import SearchIntent, exact_identifier_boost, parse_search_intent
+from app.services import semantic_readiness
+from app.services.rank_fusion import FusedHit, fuse_weighted_rrf
+from app.services.search_intent import (
+    EXACT_IDENTIFIER_BOOST,
+    SearchIntent,
+    exact_identifier_boost,
+    parse_search_intent,
+)
 from app.services.text_cleaner import normalize_for_search
 
 MAX_QUERY_LENGTH = 200
@@ -56,32 +63,10 @@ def search(
 
         return search_semantic_sections(db, filters, role, limit=limit, offset=offset)
 
-    fetch_limit = offset + limit
-    results: list[SearchResult] = []
-    act_count = section_count = 0
-    if not (relationship_type or mapped_status):
-        act_count, act_rows = _act_results(db, filters, role, fetch_limit)
-        section_count, section_rows = _section_results(db, filters, role, fetch_limit)
-        results.extend(act_rows)
-        results.extend(section_rows)
-    ref_count, ref_rows = _reference_results(db, filters, role, fetch_limit)
-    results.extend(ref_rows)
+    if search_mode == "all" and _hybrid_is_ready(db):
+        return _hybrid_search(db, filters, role, limit=limit, offset=offset)
 
-    results.sort(key=lambda item: (-item.score, item.result_type, item.title, item.id))
-    paged_results = results[offset : offset + limit]
-    total_results = act_count + section_count + ref_count
-
-    return SearchResponse(
-        query=query,
-        results=paged_results,
-        total_results=total_results,
-        act_results=act_count,
-        section_results=section_count,
-        reference_results=ref_count,
-        limit=limit,
-        offset=offset,
-        disclaimer=LEGAL_DISCLAIMER,
-    )
+    return _keyword_search(db, filters, role, limit=limit, offset=offset)
 
 
 class _SearchFilters:
@@ -116,6 +101,138 @@ class _SearchFilters:
     @property
     def has_query(self) -> bool:
         return bool(self.normalized_query)
+
+
+def _keyword_search(
+    db: Session,
+    filters: _SearchFilters,
+    role: UserRole,
+    *,
+    limit: int,
+    offset: int,
+) -> SearchResponse:
+    fetch_limit = offset + limit
+    act_count, section_count, ref_count, results = _collect_keyword_results(
+        db, filters, role, fetch_limit
+    )
+    results = _sorted_keyword_results(results)
+    return SearchResponse(
+        query=filters.query,
+        results=results[offset : offset + limit],
+        total_results=act_count + section_count + ref_count,
+        act_results=act_count,
+        section_results=section_count,
+        reference_results=ref_count,
+        limit=limit,
+        offset=offset,
+        disclaimer=LEGAL_DISCLAIMER,
+    )
+
+
+def _hybrid_search(
+    db: Session,
+    filters: _SearchFilters,
+    role: UserRole,
+    *,
+    limit: int,
+    offset: int,
+) -> SearchResponse:
+    settings = get_settings()
+    pool_size = max(settings.semantic_candidate_limit, offset + limit)
+    fused = fuse_weighted_rrf(
+        _keyword_candidate_pool(db, filters, role, pool_size),
+        _semantic_candidate_pool(db, filters, role, pool_size),
+        rrf_k=settings.hybrid_rrf_k,
+        keyword_weight=settings.hybrid_keyword_weight,
+        semantic_weight=settings.hybrid_semantic_weight,
+        exact_identifier_boost=lambda item: _result_identifier_boost(item, filters.intent),
+    )
+    include_components = role == UserRole.ADMIN
+    results = [_fused_search_result(hit, include_components) for hit in fused]
+    return SearchResponse(
+        query=filters.query,
+        results=results[offset : offset + limit],
+        total_results=len(results),
+        act_results=sum(1 for item in results if item.result_type == "ACT"),
+        section_results=sum(1 for item in results if item.result_type == "SECTION"),
+        reference_results=sum(1 for item in results if item.result_type == "REFERENCE"),
+        limit=limit,
+        offset=offset,
+        disclaimer=LEGAL_DISCLAIMER,
+    )
+
+
+def _hybrid_is_ready(db: Session) -> bool:
+    settings = get_settings()
+    if not settings.semantic_search_enabled:
+        return False
+    return semantic_readiness.probe_semantic_readiness(db, settings).ready
+
+
+def _collect_keyword_results(
+    db: Session, filters: _SearchFilters, role: UserRole, fetch_limit: int
+) -> tuple[int, int, int, list[SearchResult]]:
+    results: list[SearchResult] = []
+    act_count = section_count = 0
+    if not (filters.relationship_type or filters.mapped_status):
+        act_count, act_rows = _act_results(db, filters, role, fetch_limit)
+        section_count, section_rows = _section_results(db, filters, role, fetch_limit)
+        results.extend(act_rows)
+        results.extend(section_rows)
+    ref_count, ref_rows = _reference_results(db, filters, role, fetch_limit)
+    results.extend(ref_rows)
+    return act_count, section_count, ref_count, results
+
+
+def _sorted_keyword_results(results: list[SearchResult]) -> list[SearchResult]:
+    return sorted(results, key=lambda item: (-item.score, item.result_type, item.title, item.id))
+
+
+def _keyword_candidate_pool(
+    db: Session, filters: _SearchFilters, role: UserRole, pool_size: int
+) -> list[SearchResult]:
+    *_, rows = _collect_keyword_results(db, filters, role, pool_size)
+    return _sorted_keyword_results(rows)[:pool_size]
+
+
+def _semantic_candidate_pool(
+    db: Session, filters: _SearchFilters, role: UserRole, pool_size: int
+) -> list[SearchResult]:
+    if not filters.has_query or filters.relationship_type or filters.mapped_status:
+        return []
+    from app.services.semantic_search import search_semantic_sections
+
+    return search_semantic_sections(db, filters, role, limit=pool_size, offset=0).results
+
+
+def _result_identifier_boost(result: SearchResult, intent: SearchIntent) -> float:
+    boost = exact_identifier_boost(
+        intent,
+        result_type=result.result_type,
+        act_number=result.act_number,
+        year=result.year,
+        title=result.title,
+        section_number=result.section_number,
+        section_path=result.section_path or result.section_number,
+    )
+    if boost:
+        return boost
+    if result.score >= EXACT_IDENTIFIER_BOOST:
+        return EXACT_IDENTIFIER_BOOST
+    return 0.0
+
+
+def _fused_search_result(hit: FusedHit[SearchResult], include_components: bool) -> SearchResult:
+    updates: dict[str, object] = {"score": hit.score}
+    if include_components:
+        updates["score_components"] = {
+            "keyword_rank": hit.keyword_rank,
+            "semantic_rank": hit.semantic_rank,
+            "keyword_contribution": hit.keyword_contribution,
+            "semantic_contribution": hit.semantic_contribution,
+            "exact_identifier_boost": hit.exact_identifier_boost,
+        }
+    return hit.payload.model_copy(update=updates)
 
 
 def _act_results(
@@ -209,6 +326,7 @@ def _section_results(
                 processing_status=section.act.processing_status,
                 section_number=section.section_number,
                 section_heading=section.heading,
+                section_path=section.section_path,
                 snippet=_snippet(section.text, filters.query),
                 verification_status=section.verification_status,
                 score=_section_score(section, filters, role),

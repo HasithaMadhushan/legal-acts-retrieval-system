@@ -2,11 +2,18 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.roles import ProcessingStatus, RelationshipType, UserRole, VerificationStatus
+from app.core.roles import (
+    EmbeddingStatus,
+    ProcessingStatus,
+    RelationshipType,
+    UserRole,
+    VerificationStatus,
+)
 from app.db.session import SessionLocal
 from app.models.act_section import ActSection
 from app.models.legal_act import LegalAct
 from app.models.legal_reference import LegalReference
+from app.services.embedding_providers import get_embedding_provider
 from app.services.search_service import _fulltext_condition, _is_postgres, search
 from app.services.text_cleaner import normalize_for_search
 
@@ -325,3 +332,335 @@ def test_search_uses_fulltext_condition_when_postgres_is_simulated(monkeypatch):
         # silently falling back to the ILIKE path.
         with pytest.raises(Exception, match="search_vector|no such column|OperationalError"):
             search(db, query="jurisdiction", role=UserRole.GENERAL_USER)
+
+
+_HYBRID_DIMENSION = 384
+_QUERY_VECTOR = [1.0] + [0.0] * (_HYBRID_DIMENSION - 1)
+_NEAR_VECTOR = [1.0] + [0.0] * (_HYBRID_DIMENSION - 1)
+_FAR_VECTOR = [0.0, 1.0] + [0.0] * (_HYBRID_DIMENSION - 2)
+
+
+def _enable_hybrid(monkeypatch) -> None:
+    from app.core.config import get_settings
+    from app.services.semantic_readiness import SemanticReadiness
+
+    monkeypatch.setattr(get_settings(), "semantic_search_enabled", True)
+    monkeypatch.setattr(
+        "app.services.semantic_readiness.probe_semantic_readiness",
+        lambda db, settings=None: SemanticReadiness(
+            enabled=True,
+            ready=True,
+            dialect="postgresql",
+            postgresql=True,
+            vector_extension=True,
+            column_dimension=384,
+            configured_dimension=384,
+            provider_ready=True,
+            pending_count=0,
+            failed_count=0,
+            stale_count=0,
+            reasons=(),
+        ),
+    )
+
+
+def _use_query_vector(monkeypatch, vector: list[float]) -> None:
+    monkeypatch.setattr(
+        "app.services.embedding_service.EmbeddingService.embed_query",
+        lambda self, text: vector,
+    )
+
+
+def _ready_fields() -> dict[str, object]:
+    provider = get_embedding_provider()
+    return {
+        "embedding_status": EmbeddingStatus.READY,
+        "embedding_provider": provider.provider_name,
+        "embedding_model": provider.model_name,
+        "embedding_dimension": provider.dimension,
+    }
+
+
+def _hybrid_act(db, *, title: str, **overrides) -> LegalAct:
+    act = LegalAct(
+        title=title,
+        normalized_title=normalize_for_search(title),
+        act_number=overrides.pop("act_number", "1"),
+        year=overrides.pop("year", 2020),
+        category=overrides.pop("category", "Courts"),
+        source_file_name=f"{title}.pdf",
+        stored_file_path=f"{title}.pdf",
+        file_sha256=uuid4().hex.ljust(64, "0")[:64],
+        raw_text=overrides.pop("raw_text", title),
+        processing_status=overrides.pop("processing_status", ProcessingStatus.VERIFIED),
+        **overrides,
+    )
+    db.add(act)
+    db.flush()
+    return act
+
+
+def _hybrid_section(
+    db,
+    act: LegalAct,
+    *,
+    section_id: str,
+    heading: str,
+    embedding: list[float] | None,
+    text: str | None = None,
+    **overrides,
+) -> ActSection:
+    body = text or heading
+    section = ActSection(
+        id=section_id,
+        act_id=act.id,
+        section_number=overrides.pop("section_number", section_id.split("-")[-1]),
+        section_path=overrides.pop("section_path", section_id),
+        heading=heading,
+        text=body,
+        normalized_text=normalize_for_search(body),
+        sort_order=len(heading),
+        verification_status=overrides.pop("verification_status", VerificationStatus.VERIFIED),
+        embedding=embedding,
+        **{**_ready_fields(), **overrides},
+    )
+    db.add(section)
+    return section
+
+
+def test_all_mode_fuses_semantic_sections_with_keyword_acts_when_ready(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        keyword_act = _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction over courts")
+        other = _hybrid_act(db, title="Unrelated Levy Act", raw_text="levy rates")
+        _hybrid_section(
+            db,
+            other,
+            section_id="section-semantic-only",
+            heading="Tribunal competence",
+            text="Tribunal competence without the keyword.",
+            embedding=_NEAR_VECTOR,
+        )
+        _hybrid_section(
+            db,
+            keyword_act,
+            section_id="section-keyword",
+            heading="Jurisdiction clause",
+            text="This clause repeats jurisdiction.",
+            embedding=_FAR_VECTOR,
+        )
+        db.commit()
+        keyword_act_id = keyword_act.id
+
+        hybrid = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all")
+        keyword = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="keyword")
+        semantic = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="semantic")
+
+    hybrid_ids = {(item.result_type, item.id) for item in hybrid.results}
+    assert ("ACT", keyword_act_id) in hybrid_ids
+    assert ("SECTION", "section-semantic-only") in hybrid_ids
+    assert ("SECTION", "section-keyword") in hybrid_ids
+    assert all(item.result_type != "ACT" for item in semantic.results)
+    assert all(item.id != "section-semantic-only" for item in keyword.results)
+    assert hybrid.total_results == len(hybrid.results)
+
+
+def test_keyword_and_semantic_modes_stay_unmixed_when_hybrid_is_ready(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        keyword_act = _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        other = _hybrid_act(db, title="Unrelated Levy Act", raw_text="levy rates")
+        _hybrid_section(
+            db,
+            other,
+            section_id="section-near",
+            heading="Tribunal competence",
+            embedding=_NEAR_VECTOR,
+        )
+        db.commit()
+        act_id = keyword_act.id
+
+        keyword = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="keyword")
+        semantic = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="semantic")
+
+    assert any(item.id == act_id for item in keyword.results)
+    assert all(item.id != "section-near" for item in keyword.results)
+    assert all(item.result_type == "SECTION" for item in semantic.results)
+    assert semantic.act_results == 0
+
+
+def test_all_mode_stays_keyword_only_when_semantic_is_disabled(monkeypatch):
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        other = _hybrid_act(db, title="Unrelated Levy Act", raw_text="levy rates")
+        _hybrid_section(
+            db,
+            other,
+            section_id="section-near",
+            heading="Tribunal competence",
+            embedding=_NEAR_VECTOR,
+        )
+        db.commit()
+
+        response = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all")
+
+    assert all(item.id != "section-near" for item in response.results)
+    assert any(item.result_type == "ACT" for item in response.results)
+
+
+def test_all_mode_stays_keyword_only_when_semantic_is_enabled_but_not_ready(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "semantic_search_enabled", True)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        other = _hybrid_act(db, title="Unrelated Levy Act", raw_text="levy rates")
+        _hybrid_section(
+            db,
+            other,
+            section_id="section-near",
+            heading="Tribunal competence",
+            embedding=_NEAR_VECTOR,
+        )
+        db.commit()
+
+        response = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all")
+
+    assert all(item.id != "section-near" for item in response.results)
+    assert any(item.result_type == "ACT" for item in response.results)
+
+
+def test_hybrid_exact_identifier_precedes_semantic_neighbour(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        exact = _hybrid_act(
+            db,
+            title="Anti-Corruption Act",
+            act_number="9",
+            year=2023,
+            raw_text="Short certified text.",
+        )
+        neighbour_host = _hybrid_act(
+            db,
+            title="Integrity Commission Act",
+            act_number="12",
+            year=2022,
+            raw_text="Unrelated body.",
+        )
+        _hybrid_section(
+            db,
+            neighbour_host,
+            section_id="section-near",
+            heading="Integrity investigations",
+            embedding=_NEAR_VECTOR,
+        )
+        db.commit()
+        exact_id = exact.id
+
+        response = search(db, query="Act No. 9 of 2023", role=UserRole.LAWYER, search_mode="all")
+
+    assert response.results[0].result_type == "ACT"
+    assert response.results[0].id == exact_id
+    assert response.results[0].score > 100.0
+    assert any(item.id == "section-near" for item in response.results)
+
+
+def test_hybrid_exact_section_path_precedes_semantic_neighbour(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        host = _hybrid_act(db, title="Penalties Act", act_number="4", year=2020, raw_text="body")
+        _hybrid_section(
+            db,
+            host,
+            section_id="zzz-exact",
+            heading="Fine amounts",
+            text="The fine is one hundred thousand rupees.",
+            embedding=None,
+            embedding_status=EmbeddingStatus.PENDING,
+            section_number="34",
+            section_path="34(2)(a)",
+        )
+        neighbour_host = _hybrid_act(
+            db, title="Integrity Commission Act", act_number="12", year=2022, raw_text="Unrelated."
+        )
+        _hybrid_section(
+            db,
+            neighbour_host,
+            section_id="aaa-near",
+            heading="Integrity investigations",
+            embedding=_NEAR_VECTOR,
+        )
+        db.commit()
+
+        response = search(db, query="section 34(2)(a)", role=UserRole.LAWYER, search_mode="all")
+
+    assert response.results[0].id == "zzz-exact"
+    assert response.results[0].score > 100.0
+    assert any(item.id == "aaa-near" for item in response.results)
+
+
+def test_hybrid_paginates_after_fusion_without_duplicate_identities(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        act = _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        _hybrid_section(
+            db,
+            act,
+            section_id="section-overlap",
+            heading="Jurisdiction clause",
+            text="This clause repeats jurisdiction.",
+            embedding=_NEAR_VECTOR,
+        )
+        _hybrid_section(
+            db,
+            act,
+            section_id="section-semantic-only",
+            heading="Tribunal competence",
+            embedding=_FAR_VECTOR,
+        )
+        db.commit()
+
+        first = search(
+            db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all", limit=1, offset=0
+        )
+        second = search(
+            db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all", limit=1, offset=1
+        )
+        full = search(db, query="jurisdiction", role=UserRole.LAWYER, search_mode="all")
+
+    identities = [(item.result_type, item.id) for item in full.results]
+    assert len(identities) == len(set(identities))
+    assert first.total_results == full.total_results == len(full.results)
+    assert first.results[0].id != second.results[0].id
+    assert {item.id for item in first.results}.isdisjoint({item.id for item in second.results})
+
+
+def test_hybrid_exposes_score_components_to_admin_not_general_users(monkeypatch):
+    _enable_hybrid(monkeypatch)
+    _use_query_vector(monkeypatch, _QUERY_VECTOR)
+    with SessionLocal() as db:
+        act = _hybrid_act(db, title="Jurisdiction Act", raw_text="jurisdiction")
+        _hybrid_section(
+            db,
+            act,
+            section_id="section-near",
+            heading="Tribunal competence",
+            embedding=_NEAR_VECTOR,
+        )
+        db.commit()
+
+        admin = search(db, query="jurisdiction", role=UserRole.ADMIN, search_mode="all")
+        public = search(db, query="jurisdiction", role=UserRole.GENERAL_USER, search_mode="all")
+
+    assert admin.results
+    assert all(item.score_components is not None for item in admin.results)
+    assert "keyword_rank" in admin.results[0].score_components
+    assert "semantic_rank" in admin.results[0].score_components
+    assert all(item.score_components is None for item in public.results)

@@ -162,6 +162,7 @@ def _section_result(section: ActSection, filters, score: float) -> SearchResult:
         processing_status=section.act.processing_status,
         section_number=section.section_number,
         section_heading=section.heading,
+        section_path=section.section_path,
         snippet=_snippet(section.text, filters.query),
         verification_status=section.verification_status,
         score=score,

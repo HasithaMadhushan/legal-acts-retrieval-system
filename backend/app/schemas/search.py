@@ -19,6 +19,7 @@ class SearchResult(BaseModel):
     processing_status: ProcessingStatus | None = None
     section_number: str | None = None
     section_heading: str | None = None
+    section_path: str | None = None
     snippet: str
     relationship_type: RelationshipType | None = None
     verification_status: VerificationStatus | None = None
@@ -27,6 +28,7 @@ class SearchResult(BaseModel):
     mapped: bool | None = None
     confidence_score: float | None = None
     score: float
+    score_components: dict[str, float | int | None] | None = None
 
 
 class SearchResponse(BaseModel):
