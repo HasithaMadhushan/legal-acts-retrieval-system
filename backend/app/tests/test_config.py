@@ -6,6 +6,8 @@ from app.core.config import DEFAULT_DEV_SECRET_KEY, Settings
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
+pytestmark = pytest.mark.no_hash_test_embeddings
+
 
 def test_production_with_default_secret_key_refuses_to_start():
     with pytest.raises(RuntimeError, match="default SECRET_KEY"):

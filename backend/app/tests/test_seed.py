@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 
@@ -49,12 +50,14 @@ def test_seed_demo_users_survives_concurrent_insert_race(client):
         rollback.assert_called_once()
 
 
+@pytest.mark.no_hash_test_embeddings
 def test_should_seed_demo_data_defaults_to_development_only():
     assert Settings(environment="development").should_seed_demo_data is True
     assert Settings(environment="staging").should_seed_demo_data is False
     assert Settings(environment="production", secret_key=PROD_SECRET).should_seed_demo_data is False
 
 
+@pytest.mark.no_hash_test_embeddings
 def test_should_seed_demo_data_explicit_override_wins():
     assert Settings(seed_demo_data=False).should_seed_demo_data is False
     assert (
