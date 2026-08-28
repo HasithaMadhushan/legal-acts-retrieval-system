@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -77,7 +77,7 @@ def probe_semantic_readiness(
 
 def _probe(db: Session, settings: Settings) -> SemanticReadiness:
     dialect, vector_extension, column_dimension = inspect_database_semantic_schema(db)
-    pending_count, failed_count, stale_count = _status_counts(db)
+    pending_count, failed_count, stale_count = _status_counts(db, settings)
     # Avoid MiniLM load on every /health while semantic serving is disabled.
     if settings.semantic_search_enabled:
         provider_ready, provider_reason = check_provider_readiness(settings)
@@ -162,16 +162,34 @@ def _parse_vector_dimension(type_name: object) -> int | None:
     return int(match.group(1))
 
 
-def _status_counts(db: Session) -> tuple[int, int, int]:
+def _status_counts(db: Session, settings: Settings) -> tuple[int, int, int]:
     rows = dict(
         db.query(ActSection.embedding_status, func.count())
         .group_by(ActSection.embedding_status)
         .all()
     )
+    provider = get_embedding_provider(settings)
+    mismatched_ready = (
+        db.query(func.count(ActSection.id))
+        .filter(ActSection.embedding_status == EmbeddingStatus.READY)
+        .filter(
+            or_(
+                ActSection.embedding.is_(None),
+                ActSection.embedding_provider != provider.provider_name,
+                ActSection.embedding_provider.is_(None),
+                ActSection.embedding_model != provider.model_name,
+                ActSection.embedding_model.is_(None),
+                ActSection.embedding_dimension != provider.dimension,
+                ActSection.embedding_dimension.is_(None),
+            )
+        )
+        .scalar()
+        or 0
+    )
     return (
         int(rows.get(EmbeddingStatus.PENDING, 0)),
         int(rows.get(EmbeddingStatus.FAILED, 0)),
-        int(rows.get(EmbeddingStatus.STALE, 0)),
+        int(rows.get(EmbeddingStatus.STALE, 0)) + int(mismatched_ready),
     )
 
 

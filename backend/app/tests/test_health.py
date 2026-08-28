@@ -173,6 +173,29 @@ def test_health_degrades_when_semantic_backfill_is_incomplete(client, monkeypatc
     assert any("backfill" in reason.lower() for reason in semantic["reasons"])
 
 
+def test_health_treats_ready_embeddings_from_an_old_model_as_stale(client, monkeypatch):
+    _add_section(
+        status=EmbeddingStatus.READY,
+        embedding_provider="old-provider",
+        embedding_model="old-model",
+        embedding_dimension=384,
+    )
+    _enable_semantic_search(monkeypatch)
+    _postgres_schema(monkeypatch)
+    monkeypatch.setattr(
+        "app.services.semantic_readiness.check_provider_readiness",
+        lambda settings: (True, None),
+    )
+
+    response = client.get("/health")
+
+    assert response.status_code == 503
+    semantic = response.json()["checks"]["semantic_configuration"]
+    assert semantic["ready"] is False
+    assert semantic["stale_count"] >= 1
+    assert any("backfill" in reason.lower() for reason in semantic["reasons"])
+
+
 def _enable_semantic_search(monkeypatch) -> None:
     from app.core.config import get_settings
 
@@ -202,7 +225,13 @@ def _fail_embedding_model_load(monkeypatch) -> None:
     )
 
 
-def _add_section(*, status: EmbeddingStatus) -> None:
+def _add_section(
+    *,
+    status: EmbeddingStatus,
+    embedding_provider: str | None = None,
+    embedding_model: str | None = None,
+    embedding_dimension: int | None = None,
+) -> None:
     title = f"Readiness {status.value} Act {uuid4().hex[:8]}"
     with SessionLocal() as db:
         act = LegalAct(
@@ -225,8 +254,11 @@ def _add_section(*, status: EmbeddingStatus) -> None:
                 text="Readiness probe body",
                 normalized_text=normalize_for_search("Readiness probe body"),
                 sort_order=1,
+                embedding=[0.1] * 384 if embedding_provider else None,
                 embedding_status=status,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+                embedding_dimension=embedding_dimension,
             )
         )
         db.commit()
-
