@@ -52,12 +52,12 @@ COPY licenses/Apache-2.0.txt /licenses/Apache-2.0.txt
 RUN test -s /licenses/THIRD_PARTY_NOTICES.md \
     && test -s /licenses/Apache-2.0.txt \
     && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
-    torch==2.13.0+cpu torchvision==0.28.0+cpu
-RUN pip install --no-cache-dir -r requirements.txt
+    torch==2.13.0+cpu torchvision==0.28.0+cpu \
+    && pip install --no-cache-dir --only-binary :all: -r requirements.txt \
+    && python -c 'import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ["EMBEDDING_MODEL"], revision=os.environ["EMBEDDING_MODEL_REVISION"])'
 
 # Bake the configured embedding model into the image while network access is
 # available. Runtime model loading is offline and therefore reproducible.
-RUN python -c 'import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ["EMBEDDING_MODEL"], revision=os.environ["EMBEDDING_MODEL_REVISION"])'
 ENV HF_HUB_OFFLINE=1
 ENV TRANSFORMERS_OFFLINE=1
 

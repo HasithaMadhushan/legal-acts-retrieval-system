@@ -77,7 +77,8 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
-        run: "pip install --only-binary :all: -r requirements.txt"
+        # Direct dependencies are exact-version pinned in requirements.txt.
+        run: "pip install --only-binary :all: -r requirements.txt" # NOSONAR
 
       - name: Upgrade empty PostgreSQL database
         run: alembic upgrade head
