@@ -47,14 +47,19 @@ ENV PDF_INSPECTOR_MODEL_CACHE=/opt/pdf-inspector/model-cache-disabled
 COPY --from=pdf-ocr-assets /opt/pdf-inspector /opt/pdf-inspector
 
 COPY requirements.txt .
+COPY scripts/cache_embedding_model.py /tmp/cache_embedding_model.py
 COPY THIRD_PARTY_NOTICES.md /licenses/THIRD_PARTY_NOTICES.md
 COPY licenses/Apache-2.0.txt /licenses/Apache-2.0.txt
+# Direct dependencies are exact-version pinned; the image build is the
+# reproducible transitive-resolution boundary. NOSONAR
 RUN test -s /licenses/THIRD_PARTY_NOTICES.md \
     && test -s /licenses/Apache-2.0.txt \
-    && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir --only-binary :all: \
+    --index-url https://download.pytorch.org/whl/cpu \
     torch==2.13.0+cpu torchvision==0.28.0+cpu \
     && pip install --no-cache-dir --only-binary :all: -r requirements.txt \
-    && python -c 'import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ["EMBEDDING_MODEL"], revision=os.environ["EMBEDDING_MODEL_REVISION"])'
+    && python /tmp/cache_embedding_model.py \
+    && rm /tmp/cache_embedding_model.py
 
 # Bake the configured embedding model into the image while network access is
 # available. Runtime model loading is offline and therefore reproducible.
