@@ -38,6 +38,53 @@ jobs:
         # (SQLite, PyMuPDF-only) so tests need no external services or secrets.
         run: python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=50
 
+  pgvector:
+    name: PostgreSQL (Alembic + pgvector)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: legal_acts
+          POSTGRES_PASSWORD: legal_acts
+          POSTGRES_DB: legal_acts_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U legal_acts -d legal_acts_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://legal_acts:legal_acts@127.0.0.1:5432/legal_acts_test
+      PGVECTOR_TEST_DATABASE_URL: postgresql+psycopg://legal_acts:legal_acts@127.0.0.1:5432/legal_acts_test
+      ENVIRONMENT: test
+      SECRET_KEY: pgvector-ci-secret
+      EMBEDDING_PROVIDER: hash-test
+      SEMANTIC_SEARCH_ENABLED: "false"
+      AUTO_MIGRATE_ON_STARTUP: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Upgrade empty PostgreSQL database
+        run: alembic upgrade head
+
+      - name: Verify native vector retrieval and HNSW
+        run: python -m pytest app/tests/test_pgvector_search.py -v
+
   frontend:
     name: Frontend (typecheck + test + build)
     runs-on: ubuntu-latest

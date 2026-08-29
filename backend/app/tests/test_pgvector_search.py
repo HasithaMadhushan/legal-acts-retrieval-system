@@ -162,9 +162,9 @@ def test_postgres_explain_selects_hnsw_index_for_nearest_neighbour():
         )
         db.add(act)
         db.flush()
-        for index in range(64):
+        for index in range(2_000):
             vector = [0.0] * SECTION_EMBEDDING_DIMENSION
-            vector[index % 8] = 1.0
+            vector[0 if index == 0 else (index % 7) + 1] = 1.0
             db.add(
                 ActSection(
                     act_id=act.id,
@@ -183,6 +183,16 @@ def test_postgres_explain_selects_hnsw_index_for_nearest_neighbour():
                 )
             )
         db.commit()
+
+        nearest = (
+            db.query(ActSection.section_number)
+            .order_by(cosine_distance_expression(QUERY_VECTOR).asc(), ActSection.id.asc())
+            .limit(1)
+            .scalar()
+        )
+        assert nearest == "0"
+
+        db.execute(text("ANALYZE act_sections"))
 
         distance = cosine_distance_expression(QUERY_VECTOR)
         query = (
