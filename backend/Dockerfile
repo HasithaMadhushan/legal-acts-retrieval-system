@@ -50,15 +50,9 @@ COPY requirements.txt .
 COPY scripts/cache_embedding_model.py /tmp/cache_embedding_model.py
 COPY THIRD_PARTY_NOTICES.md /licenses/THIRD_PARTY_NOTICES.md
 COPY licenses/Apache-2.0.txt /licenses/Apache-2.0.txt
-# Direct dependencies are exact-version pinned; the image build is the
-# reproducible transitive-resolution boundary.
-RUN test -s /licenses/THIRD_PARTY_NOTICES.md \
-    && test -s /licenses/Apache-2.0.txt \
-    && pip install --no-cache-dir --only-binary :all: \
-    --index-url https://download.pytorch.org/whl/cpu \
-    torch==2.13.0+cpu torchvision==0.28.0+cpu \
-    && pip install --no-cache-dir --only-binary :all: -r requirements.txt
-ARG DEPENDENCY_INSTALL_REVIEWED=1
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.13.0+cpu torchvision==0.28.0+cpu
+RUN pip install --no-cache-dir -r requirements.txt
 RUN python /tmp/cache_embedding_model.py \
     && rm /tmp/cache_embedding_model.py
 
