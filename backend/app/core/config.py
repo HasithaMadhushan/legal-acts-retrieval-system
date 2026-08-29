@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     # fixtures log in dozens of times per second from a single "client" IP.
     rate_limit_enabled: bool = True
     auth_rate_limit: str = "20/minute"
+    search_rate_limit: str = "60/minute"
     # Object storage for uploaded PDFs. Leave unset (the default) to store
     # files on local disk under UPLOAD_DIR -- correct for a single-instance
     # deployment. Set S3_BUCKET to switch to S3 or an S3-compatible service
@@ -84,6 +85,7 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 32
     embedding_device: str = "cpu"
     embedding_normalize: bool = True
+    embedding_model_timeout_seconds: float = 120.0
     semantic_candidate_limit: int = 100
     hybrid_rrf_k: int = 60
     hybrid_keyword_weight: float = 1.0
@@ -128,6 +130,7 @@ class Settings(BaseSettings):
             "HYBRID_RRF_K": self.hybrid_rrf_k,
             "HYBRID_KEYWORD_WEIGHT": self.hybrid_keyword_weight,
             "HYBRID_SEMANTIC_WEIGHT": self.hybrid_semantic_weight,
+            "EMBEDDING_MODEL_TIMEOUT_SECONDS": self.embedding_model_timeout_seconds,
         }
         non_finite_names = [
             name for name, value in positive_values.items() if not isfinite(value)

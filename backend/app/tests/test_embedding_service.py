@@ -1,5 +1,6 @@
 import hashlib
 import math
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -201,6 +202,35 @@ def test_sentence_transformers_settings_select_real_provider_without_loading_mod
     assert provider.model_name == "sentence-transformers/all-MiniLM-L6-v2"
     assert provider.dimension == 384
     assert loads == []
+
+
+def test_sentence_transformer_model_load_is_bounded_by_timeout(monkeypatch):
+    started = Event()
+    release = Event()
+
+    def slow_load(model_name: str, revision: str, device: str):
+        started.set()
+        release.wait(timeout=1)
+        return _RecordingModel(dimension=8)
+
+    monkeypatch.setattr(
+        "app.services.embedding_providers.load_sentence_transformer",
+        slow_load,
+    )
+    provider = SentenceTransformerProvider(
+        model_name="test-model",
+        dimension=8,
+        revision="main",
+        device="cpu",
+        batch_size=8,
+        timeout_seconds=0.01,
+    )
+    try:
+        with pytest.raises(TimeoutError):
+            provider.truncate_text("bounded model load")
+        assert started.is_set()
+    finally:
+        release.set()
 
 
 def test_deterministic_provider_returns_configured_dimension_and_unit_norm():

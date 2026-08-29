@@ -1,11 +1,12 @@
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.legal_safety import ensure_no_legal_advice_query
+from app.core.rate_limit import limiter, search_rate_limit
 from app.core.roles import ProcessingStatus, RelationshipType, VerificationStatus
 from app.db.session import get_db
 from app.models.legal_act import LegalAct
@@ -31,7 +32,9 @@ router = APIRouter(prefix="/search", tags=["search"])
         503: {"description": SEMANTIC_SEARCH_NOT_READY},
     },
 )
+@limiter.limit(search_rate_limit)
 def search_endpoint(
+    request: Request,
     q: str = Query(default="", max_length=200),
     year: int | None = None,
     act_number: str | None = None,

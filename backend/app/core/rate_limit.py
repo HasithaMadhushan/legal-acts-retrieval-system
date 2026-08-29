@@ -20,3 +20,8 @@ limiter = Limiter(key_func=get_remote_address, enabled=get_settings().rate_limit
 def auth_rate_limit() -> str:
     """Read the configured auth rate limit lazily so tests can override it."""
     return get_settings().auth_rate_limit
+
+
+def search_rate_limit() -> str:
+    """Bound retrieval work per client; shared storage is required for a global limit."""
+    return get_settings().search_rate_limit

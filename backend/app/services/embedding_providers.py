@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import math
 import re
-from threading import Lock
+from dataclasses import dataclass, field
+from threading import Event, Lock, Thread
 from typing import Protocol
 
 from app.core.config import Settings, get_settings
@@ -12,6 +13,14 @@ _WHITESPACE = re.compile(r"\s+")
 _shared_model_lock = Lock()
 _shared_model: object | None = None
 _shared_model_key: tuple[str, str, str] | None = None
+_shared_model_load: _ModelLoad | None = None
+
+
+@dataclass
+class _ModelLoad:
+    completed: Event = field(default_factory=Event)
+    model: object | None = None
+    error: BaseException | None = None
 
 
 class EmbeddingProvider(Protocol):
@@ -33,20 +42,59 @@ def load_sentence_transformer(model_name: str, revision: str, device: str) -> ob
 
 
 def reset_shared_model() -> None:
-    global _shared_model, _shared_model_key
+    global _shared_model, _shared_model_key, _shared_model_load
     with _shared_model_lock:
         _shared_model = None
         _shared_model_key = None
+        _shared_model_load = None
 
 
-def _shared_sentence_transformer(model_name: str, revision: str, device: str) -> object:
-    global _shared_model, _shared_model_key
+def _shared_sentence_transformer(
+    model_name: str,
+    revision: str,
+    device: str,
+    timeout_seconds: float,
+) -> object:
+    global _shared_model, _shared_model_key, _shared_model_load
     key = (model_name, revision, device)
     with _shared_model_lock:
-        if _shared_model is None or _shared_model_key != key:
-            _shared_model = load_sentence_transformer(model_name, revision, device)
+        if _shared_model is not None and _shared_model_key == key:
+            return _shared_model
+        if _shared_model_load is None or _shared_model_key != key:
             _shared_model_key = key
-        return _shared_model
+            _shared_model_load = _ModelLoad()
+            Thread(
+                target=_load_model,
+                args=(_shared_model_load, model_name, revision, device),
+                daemon=True,
+                name="embedding-model-load",
+            ).start()
+        load = _shared_model_load
+    if not load.completed.wait(timeout_seconds):
+        raise TimeoutError(f"Embedding model load exceeded {timeout_seconds:g} seconds")
+    if load.error is not None:
+        raise load.error
+    if load.model is None:
+        raise RuntimeError("Embedding model loader returned no model")
+    with _shared_model_lock:
+        if _shared_model_key == key:
+            _shared_model = load.model
+            _shared_model_load = None
+    return load.model
+
+
+def _load_model(
+    load: _ModelLoad,
+    model_name: str,
+    revision: str,
+    device: str,
+) -> None:
+    try:
+        load.model = load_sentence_transformer(model_name, revision, device)
+    except BaseException as exc:
+        load.error = exc
+    finally:
+        load.completed.set()
 
 
 def _hash_vector(text: str, dimension: int) -> list[float]:
@@ -115,12 +163,14 @@ class SentenceTransformerProvider:
         revision: str,
         device: str,
         batch_size: int,
+        timeout_seconds: float = 120.0,
     ) -> None:
         self.model_name = model_name
         self.dimension = dimension
         self._revision = revision
         self._device = device
         self._batch_size = batch_size
+        self._timeout_seconds = timeout_seconds
 
     @classmethod
     def from_settings(cls, settings: Settings) -> SentenceTransformerProvider:
@@ -130,10 +180,16 @@ class SentenceTransformerProvider:
             revision=settings.embedding_model_revision,
             device=settings.embedding_device,
             batch_size=settings.embedding_batch_size,
+            timeout_seconds=settings.embedding_model_timeout_seconds,
         )
 
     def _get_model(self) -> object:
-        return _shared_sentence_transformer(self.model_name, self._revision, self._device)
+        return _shared_sentence_transformer(
+            self.model_name,
+            self._revision,
+            self._device,
+            self._timeout_seconds,
+        )
 
     def truncate_text(self, text: str) -> str:
         if not text:
