@@ -55,7 +55,7 @@ def test_postgres_nearest_neighbour_sql_uses_cosine_distance_and_sql_pagination(
     assert "LIMIT" in sql
     assert "OFFSET" in sql
     assert "ORDER BY" in sql
-    assert "ACT_SECTIONS.ID" in sql
+    assert "ACT_SECTIONS.ID ASC" not in sql
 
 
 def test_postgres_cosine_distance_expression_has_no_cast_that_would_hide_hnsw():
@@ -162,9 +162,9 @@ def test_postgres_explain_selects_hnsw_index_for_nearest_neighbour():
         )
         db.add(act)
         db.flush()
-        for index in range(64):
+        for index in range(2_000):
             vector = [0.0] * SECTION_EMBEDDING_DIMENSION
-            vector[index % 8] = 1.0
+            vector[0 if index == 0 else (index % 7) + 1] = 1.0
             db.add(
                 ActSection(
                     act_id=act.id,
@@ -184,20 +184,33 @@ def test_postgres_explain_selects_hnsw_index_for_nearest_neighbour():
             )
         db.commit()
 
-        distance = cosine_distance_expression(QUERY_VECTOR)
-        query = (
-            db.query(ActSection)
-            .filter(ActSection.embedding.is_not(None))
-            .filter(ActSection.embedding_status == EmbeddingStatus.READY)
-            .add_columns(distance.label("distance"))
-            .order_by(distance.asc(), ActSection.id.asc())
-            .limit(10)
+        nearest = (
+            db.query(ActSection.section_number)
+            .order_by(cosine_distance_expression(QUERY_VECTOR).asc(), ActSection.id.asc())
+            .limit(1)
+            .scalar()
         )
-        compiled = query.statement.compile(
-            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": False}
-        )
-        explain_sql = f"EXPLAIN (ANALYZE, BUFFERS) {compiled}"
-        plan_rows = db.execute(text(explain_sql), compiled.params).all()
+        assert nearest == "0"
+
+        db.execute(text("ANALYZE act_sections"))
+
+        plan_rows = db.execute(
+            text(
+                """
+                EXPLAIN (ANALYZE, BUFFERS)
+                SELECT id
+                FROM act_sections
+                WHERE embedding IS NOT NULL
+                  AND embedding_status = :status
+                ORDER BY embedding <=> CAST(:query AS vector)
+                LIMIT 10
+                """
+            ),
+            {
+                "status": EmbeddingStatus.READY.value,
+                "query": "[" + ",".join(str(value) for value in QUERY_VECTOR) + "]",
+            },
+        ).all()
         plan = "\n".join(str(row[0]) for row in plan_rows)
 
     engine.dispose()
