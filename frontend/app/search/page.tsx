@@ -215,7 +215,7 @@ function SearchForm() {
             value={searchMode}
             onChange={setSearchMode}
             options={[
-              { value: "all", label: "All methods" },
+              { value: "all", label: "Hybrid" },
               { value: "keyword", label: "Keyword" },
               { value: "semantic", label: "Semantic" }
             ]}
@@ -233,7 +233,14 @@ function SearchForm() {
             {loading ? "Searching…" : "Search"}
           </Button>
         </div>
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        <p className="text-xs text-muted-foreground">
+          {searchMode === "keyword"
+            ? "Matches exact words, Act identifiers, and filters."
+            : searchMode === "semantic"
+              ? "Finds sections by meaning. Availability depends on the current embedding backfill."
+              : "Combines exact keyword matches with meaning-based section retrieval when semantic search is ready."}
+        </p>
+        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       </form>
 
       {response ? (

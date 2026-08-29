@@ -7,8 +7,8 @@ from app.core.roles import ProcessingStatus, RelationshipType, VerificationStatu
 SearchRequestedMode = Literal["all", "keyword", "semantic"]
 SearchEffectiveMode = Literal["keyword", "semantic", "hybrid"]
 
-SEMANTIC_SEARCH_DISABLED = "Semantic search is not enabled. Use Keyword or All methods."
-SEMANTIC_SEARCH_NOT_READY = "Semantic search is enabled but not ready. Use Keyword or All methods."
+SEMANTIC_SEARCH_DISABLED = "Semantic search is not enabled. Use Keyword or Hybrid."
+SEMANTIC_SEARCH_NOT_READY = "Semantic search is enabled but not ready. Use Keyword or Hybrid."
 
 
 class SearchResult(BaseModel):

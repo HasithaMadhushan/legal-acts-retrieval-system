@@ -89,7 +89,7 @@ describe("frontend role and safety smoke checks", () => {
     expect(searchPage).toContain("Search");
     expect(searchPage).toContain("search_mode");
     expect(searchPage).toContain("verification_status");
-    expect(searchPage).toContain("All methods");
+    expect(searchPage).toContain("Hybrid");
     expect(searchPage).toContain("Verified only");
     expect(searchPage).toContain("No verified results are available");
     expect(lawyerSearchPage).toContain("Processing status");
