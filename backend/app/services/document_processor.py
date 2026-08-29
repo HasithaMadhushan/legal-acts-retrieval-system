@@ -1,10 +1,10 @@
-
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.roles import (
+    EmbeddingStatus,
     ExtractionMethod,
     ParserName,
     ProcessingJobStatus,
@@ -18,7 +18,7 @@ from app.models.legal_reference import LegalReference
 from app.models.mixins import utc_now
 from app.models.processing_job import ProcessingJob
 from app.models.user import User
-from app.services.embedding_service import embed_text
+from app.services.embedding_service import EmbeddingError, EmbeddingService
 from app.services.extraction_artifact import (
     ARTIFACT_SCHEMA_VERSION,
     ArtifactPersistError,
@@ -230,7 +230,9 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
         preserved_reference_count = len(existing_references) - len(references_to_delete_ids)
 
         if references_to_delete_ids:
-            db.execute(delete(LegalReference).where(LegalReference.id.in_(references_to_delete_ids)))
+            db.execute(
+                delete(LegalReference).where(LegalReference.id.in_(references_to_delete_ids))
+            )
         if sections_to_delete_ids:
             db.execute(delete(ActSection).where(ActSection.id.in_(sections_to_delete_ids)))
         db.flush()
@@ -269,17 +271,18 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
             )
             db.add(section)
             sections.append(section)
-            section.embedding = embed_text(section.text)
         db.flush()
+
+        job.current_step = "Generating embeddings"
+        _embed_created_sections(sections, preserved_sections, warnings)
+        summary["warnings"] = _unique_strings(warnings)
 
         job.current_step = "Extracting and mapping references"
         job.progress_percent = 80
         reference_drafts: list[ReferenceDraft] = []
         references: list[LegalReference] = []
         act_reference_drafts = extract_act_references([section.text for section in sections])
-        for section, section_reference_drafts in zip(
-            sections, act_reference_drafts, strict=True
-        ):
+        for section, section_reference_drafts in zip(sections, act_reference_drafts, strict=True):
             for draft in section_reference_drafts:
                 reference_drafts.append(draft)
                 reference = LegalReference(
@@ -339,13 +342,12 @@ def _execute_processing_job(db: Session, job: ProcessingJob, act: LegalAct) -> P
                 "sections_preserved": len(preserved_sections),
                 "references_created": len(references),
                 "references_preserved": preserved_reference_count,
+                "embeddings": _embedding_summary(sections, preserved_sections),
                 "errors": [],
             }
         )
         job.summary_json = summary
-        artifact_pointer = _store_extraction_artifact(
-            act, job, parsed, prepared, warnings, summary
-        )
+        artifact_pointer = _store_extraction_artifact(act, job, parsed, prepared, warnings, summary)
         try:
             db.commit()
         except Exception:
@@ -401,9 +403,7 @@ def _fail_processing_job(
                 ),
             }
         )
-    summary["errors"] = _unique_strings(
-        [*_as_string_list(summary.get("errors")), error_message]
-    )
+    summary["errors"] = _unique_strings([*_as_string_list(summary.get("errors")), error_message])
 
     failed_act = db.get(LegalAct, act_id)
     failed_job = db.get(ProcessingJob, job_id)
@@ -504,23 +504,29 @@ def _select_parser(settings) -> tuple[PdfParser, str, list[str]]:
             "Docling was requested, but DOCLING_ENABLED=false; "
             "falling back to the native-first route."
         )
-        return _native_first_route(
-            settings, inspector=_configured_inspector(settings)
-        ), requested, warnings
+        return (
+            _native_first_route(settings, inspector=_configured_inspector(settings)),
+            requested,
+            warnings,
+        )
 
     if requested == "ocr":
         warnings.append(_ocr_primary_warning(settings))
-        return _native_first_route(
-            settings, inspector=_configured_inspector(settings)
-        ), requested, warnings
+        return (
+            _native_first_route(settings, inspector=_configured_inspector(settings)),
+            requested,
+            warnings,
+        )
 
     if requested not in {"", "pymupdf"}:
         warnings.append(
             f"Unknown DOC_PARSER_PRIMARY={requested!r}; falling back to the native-first route."
         )
-        return _native_first_route(
-            settings, inspector=_configured_inspector(settings)
-        ), requested, warnings
+        return (
+            _native_first_route(settings, inspector=_configured_inspector(settings)),
+            requested,
+            warnings,
+        )
 
     return (
         _native_first_route(settings, inspector=_configured_inspector(settings)),
@@ -558,9 +564,7 @@ def _configured_inspector(settings) -> PdfInspectorParser | None:
     )
 
 
-def _native_first_route(
-    settings, *, inspector: PdfInspectorParser | None
-) -> NativeFirstPdfParser:
+def _native_first_route(settings, *, inspector: PdfInspectorParser | None) -> NativeFirstPdfParser:
     return NativeFirstPdfParser(PyMuPdfParser(), inspector, _optional_docling(settings))
 
 
@@ -641,6 +645,46 @@ def _date_string(value) -> str | None:
 
 def _section_key(section_number: str, section_path: str | None) -> tuple[str, str | None]:
     return (section_number, section_path)
+
+
+def _embed_created_sections(
+    created_sections: list[ActSection],
+    preserved_sections: list[ActSection],
+    warnings: list[str],
+) -> None:
+    embedding_service = EmbeddingService()
+    _mark_stale_preserved_embeddings(embedding_service, preserved_sections)
+    try:
+        embedding_service.embed_sections(created_sections)
+    except EmbeddingError:
+        warnings.append("Embedding generation failed; extracted sections and references were kept.")
+
+
+def _mark_stale_preserved_embeddings(
+    embedding_service: EmbeddingService,
+    preserved_sections: list[ActSection],
+) -> None:
+    for section in preserved_sections:
+        if section.embedding_status == EmbeddingStatus.READY and embedding_service.needs_embedding(
+            section
+        ):
+            section.embedding_status = EmbeddingStatus.STALE
+
+
+def _status_count(sections: list[ActSection], status: EmbeddingStatus) -> int:
+    return sum(1 for section in sections if section.embedding_status == status)
+
+
+def _embedding_summary(
+    created_sections: list[ActSection],
+    preserved_sections: list[ActSection],
+) -> dict[str, int]:
+    return {
+        "embedded": _status_count(created_sections, EmbeddingStatus.READY),
+        "failed": _status_count(created_sections, EmbeddingStatus.FAILED),
+        "skipped": _status_count(preserved_sections, EmbeddingStatus.READY),
+        "stale": _status_count(preserved_sections, EmbeddingStatus.STALE),
+    }
 
 
 def _unique_strings(values: list[str]) -> list[str]:
