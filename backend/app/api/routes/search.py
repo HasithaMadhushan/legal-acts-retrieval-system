@@ -10,14 +10,26 @@ from app.core.roles import ProcessingStatus, RelationshipType, VerificationStatu
 from app.db.session import get_db
 from app.models.legal_act import LegalAct
 from app.models.user import User
-from app.schemas.search import SearchResponse, SuggestResponse
+from app.schemas.search import (
+    SEMANTIC_SEARCH_DISABLED,
+    SEMANTIC_SEARCH_NOT_READY,
+    SearchResponse,
+    SuggestResponse,
+)
 from app.services.search_service import search
+from app.services.semantic_readiness import probe_semantic_readiness
 from app.services.text_cleaner import like_contains
 
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-@router.get("", response_model=SearchResponse)
+@router.get(
+    "",
+    responses={
+        400: {"description": SEMANTIC_SEARCH_DISABLED},
+        503: {"description": SEMANTIC_SEARCH_NOT_READY},
+    },
+)
 def search_endpoint(
     q: str = Query(default="", max_length=200),
     year: int | None = None,
@@ -35,11 +47,8 @@ def search_endpoint(
 ) -> SearchResponse:
     query = q.strip()
     ensure_no_legal_advice_query(query)
-    if search_mode == "semantic" and not get_settings().semantic_search_enabled:
-        raise HTTPException(
-            status_code=400,
-            detail="Semantic search is not enabled. Use Keyword or All methods.",
-        )
+    if search_mode == "semantic":
+        _reject_unservable_semantic_search(db)
     return search(
         db,
         query=query,
@@ -55,6 +64,14 @@ def search_endpoint(
         limit=limit,
         offset=offset,
     )
+
+
+def _reject_unservable_semantic_search(db: Session) -> None:
+    if not get_settings().semantic_search_enabled:
+        raise HTTPException(status_code=400, detail=SEMANTIC_SEARCH_DISABLED)
+    readiness = probe_semantic_readiness(db)
+    if not readiness.ready:
+        raise HTTPException(status_code=503, detail=SEMANTIC_SEARCH_NOT_READY)
 
 
 @router.get("/suggest", response_model=SuggestResponse)

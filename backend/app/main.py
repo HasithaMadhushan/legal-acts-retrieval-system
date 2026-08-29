@@ -32,6 +32,7 @@ from app.core.rate_limit import limiter
 from app.db.migrate import run_migrations
 from app.db.seed import seed_demo_users
 from app.db.session import SessionLocal, get_db
+from app.services.semantic_readiness import probe_semantic_readiness
 from app.services.stale_jobs import fail_stale_running_jobs
 from app.services.storage import get_storage
 
@@ -108,6 +109,7 @@ def health(db: Session = Depends(get_db)) -> JSONResponse:
         "database": _check_database(db),
         "upload_directory": _check_upload_directory(),
         "parser_configuration": _check_parser_configuration(),
+        "semantic_configuration": _check_semantic_configuration(db),
     }
     healthy = all(check["ok"] for check in checks.values())
     return JSONResponse(
@@ -139,6 +141,10 @@ def _check_parser_configuration() -> dict[str, object]:
     if requested not in known_parsers:
         return {"ok": False, "error": f"Unknown DOC_PARSER_PRIMARY={requested!r}."}
     return {"ok": True, "parser_requested": requested or "pymupdf"}
+
+
+def _check_semantic_configuration(db: Session) -> dict[str, object]:
+    return probe_semantic_readiness(db).as_health_check()
 
 
 @app.get("/api/v1/legal-disclaimer", tags=["safety"])
