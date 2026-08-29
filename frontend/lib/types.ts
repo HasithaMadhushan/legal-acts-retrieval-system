@@ -261,6 +261,9 @@ export interface SearchResult {
   score: number;
 }
 
+export type SearchRequestedMode = "all" | "keyword" | "semantic";
+export type SearchEffectiveMode = "keyword" | "semantic" | "hybrid";
+
 export interface SearchResponse {
   query: string;
   results: SearchResult[];
@@ -271,6 +274,19 @@ export interface SearchResponse {
   limit: number;
   offset: number;
   disclaimer: string;
+  requested_mode: SearchRequestedMode;
+  effective_mode: SearchEffectiveMode;
+  embedding_model: string | null;
+  semantic_ready: boolean;
+}
+
+export function describeSearchMode(
+  response: Pick<SearchResponse, "requested_mode" | "effective_mode">
+): string {
+  if (response.requested_mode === "all" && response.effective_mode === "keyword") {
+    return "using keyword search (requested all)";
+  }
+  return `using ${response.effective_mode} search`;
 }
 
 export interface SavedItem {

@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { createSavedItem, deleteSavedItem, listSavedItems, search } from "@/lib/api";
+import { createSavedItem, deleteSavedItem, listSavedItems, search, searchErrorMessage } from "@/lib/api";
 import { containsAdviceIntent } from "@/lib/auth";
-import type { SavedItem, SavedItemCreatePayload, SearchResponse, SearchResult } from "@/lib/types";
+import { describeSearchMode, type SavedItem, type SavedItemCreatePayload, type SearchResponse, type SearchResult } from "@/lib/types";
 import { RoleGuard } from "@/components/role-guard";
 import { SearchResults } from "@/components/search-results";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ export default function LawyerSearchPage() {
   const [relationshipType, setRelationshipType] = useState("");
   const [verificationStatus, setVerificationStatus] = useState("");
   const [mappedStatus, setMappedStatus] = useState("");
+  const [searchMode, setSearchMode] = useState("all");
   const [limit, setLimit] = useState("25");
   const [offset, setOffset] = useState(0);
   const [response, setResponse] = useState<SearchResponse | null>(null);
@@ -59,13 +60,14 @@ export default function LawyerSearchPage() {
         ...(relationshipType ? { relationship_type: relationshipType } : {}),
         ...(verificationStatus ? { verification_status: verificationStatus } : {}),
         ...(mappedStatus ? { mapped_status: mappedStatus } : {}),
+        search_mode: searchMode,
         limit,
         offset: String(nextOffset)
       });
       setResponse(data);
       setOffset(nextOffset);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed.");
+      setError(searchErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -155,7 +157,7 @@ export default function LawyerSearchPage() {
           </div>
           <details className="text-sm text-muted-foreground">
             <summary className="cursor-pointer font-medium text-foreground">Advanced filters</summary>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
               <SearchField label="Year">
                 <Input
                   id="year"
@@ -193,13 +195,30 @@ export default function LawyerSearchPage() {
                 onChange={(value) => setMappedStatus(value === "ANY" ? "" : value)}
                 options={["ANY", "mapped", "unresolved"]}
               />
+              <SelectField
+                label="Mode"
+                value={searchMode}
+                onChange={setSearchMode}
+                options={["all", "keyword", "semantic"]}
+              />
               <SelectField label="Page size" value={limit} onChange={setLimit} options={["10", "25", "50"]} />
             </div>
           </details>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           {workspaceMessage ? <p className="text-sm text-muted-foreground">{workspaceMessage}</p> : null}
         </form>
-        {response ? <p className="text-sm"><strong>{response.total_results} mapped edges</strong><span className="text-muted-foreground"> · pending items are marked for review</span></p> : null}
+        {response ? (
+          <p className="text-sm">
+            <strong>{response.total_results} mapped edges</strong>
+            <span className="text-muted-foreground">
+              {" "}
+              · pending items are marked for review · {describeSearchMode(response)}
+              {response.semantic_ready && response.embedding_model
+                ? ` · ${response.embedding_model}`
+                : ""}
+            </span>
+          </p>
+        ) : null}
         {loading ? <div className="space-y-2">{[0, 1, 2].map((item) => <Skeleton key={item} className="h-28 w-full" />)}</div> : null}
         <SearchResults
           response={response}
@@ -264,6 +283,7 @@ function SelectField({
 function formatOption(value: string) {
   if (value === "ANY") return "Any";
   if (value === "DEFAULT") return "Verified + pending";
+  if (value === "all") return "All methods";
   return value.replaceAll("_", " ").toLowerCase().replace(/^./, (character) => character.toUpperCase());
 }
 

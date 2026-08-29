@@ -82,9 +82,7 @@ def test_semantic_search_enabled_but_not_ready_returns_503(client, user_token, m
     assert "not ready" in response.json()["detail"].lower()
 
 
-def test_keyword_search_stays_available_when_semantic_is_not_ready(
-    client, user_token, monkeypatch
-):
+def test_keyword_search_stays_available_when_semantic_is_not_ready(client, user_token, monkeypatch):
     _enable_semantic_search(monkeypatch)
 
     response = client.get(
@@ -152,9 +150,7 @@ def test_semantic_search_does_not_fall_back_to_hash_when_model_is_unavailable(
     assert "not ready" in response.json()["detail"].lower()
 
 
-def test_semantic_search_returns_503_when_backfill_is_incomplete(
-    client, user_token, monkeypatch
-):
+def test_semantic_search_returns_503_when_backfill_is_incomplete(client, user_token, monkeypatch):
     _add_section(status=EmbeddingStatus.PENDING)
     _enable_semantic_search(monkeypatch)
     _postgres_schema(monkeypatch)
@@ -170,8 +166,16 @@ def test_semantic_search_returns_503_when_backfill_is_incomplete(
 
 def test_semantic_search_hides_unverified_sections_from_general_users(monkeypatch):
     from app.core.config import get_settings
+    from app.services.embedding_providers import get_embedding_provider
 
     monkeypatch.setattr(get_settings(), "semantic_search_enabled", True)
+    provider = get_embedding_provider()
+    ready = {
+        "embedding_status": EmbeddingStatus.READY,
+        "embedding_provider": provider.provider_name,
+        "embedding_model": provider.model_name,
+        "embedding_dimension": provider.dimension,
+    }
     with SessionLocal() as db:
         act = LegalAct(
             title="Embedding Visibility Act",
@@ -194,6 +198,7 @@ def test_semantic_search_hides_unverified_sections_from_general_users(monkeypatc
             sort_order=1,
             verification_status=VerificationStatus.VERIFIED,
             embedding=embed_text("High Court jurisdiction over civil matters."),
+            **ready,
         )
         pending = ActSection(
             act_id=act.id,
@@ -205,6 +210,7 @@ def test_semantic_search_hides_unverified_sections_from_general_users(monkeypatc
             sort_order=2,
             verification_status=VerificationStatus.PENDING,
             embedding=embed_text("High Court jurisdiction draft notes."),
+            **ready,
         )
         db.add_all([verified, pending])
         db.commit()
