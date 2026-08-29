@@ -91,7 +91,7 @@ def _load_model(
 ) -> None:
     try:
         load.model = load_sentence_transformer(model_name, revision, device)
-    except BaseException as exc:
+    except Exception as exc:
         load.error = exc
     finally:
         load.completed.set()

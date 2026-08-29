@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 import statistics
 import time
@@ -29,7 +30,6 @@ class ScenarioResult:
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--database-url", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sizes", nargs="+", type=int, default=[1_000, 10_000])
     parser.add_argument("--runs", type=int, default=20)
@@ -111,7 +111,10 @@ def main() -> None:
     args = _arguments()
     if args.runs < 1 or any(size < 1 for size in args.sizes):
         raise SystemExit("--runs and every --sizes value must be positive")
-    engine = create_engine(args.database_url, future=True)
+    database_url = os.environ.get("PGVECTOR_BENCHMARK_DATABASE_URL")
+    if not database_url:
+        raise SystemExit("Set PGVECTOR_BENCHMARK_DATABASE_URL to an isolated test database")
+    engine = create_engine(database_url, future=True)
     with engine.begin() as connection:
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         results = [

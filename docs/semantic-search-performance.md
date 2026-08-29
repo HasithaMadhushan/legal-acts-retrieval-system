@@ -6,8 +6,8 @@ Run against an isolated PostgreSQL 16 database with pgvector:
 
 ```bash
 cd backend
+PGVECTOR_BENCHMARK_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST/DB \
 python -m scripts.benchmark_semantic_search \
-  --database-url postgresql+psycopg://USER:PASSWORD@HOST/DB \
   --sizes 1000 10000 \
   --runs 20 \
   --output ../data/retrieval-evaluation/results/<timestamp>-performance

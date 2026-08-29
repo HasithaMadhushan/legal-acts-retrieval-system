@@ -33,7 +33,7 @@ router = APIRouter(prefix="/search", tags=["search"])
     },
 )
 @limiter.limit(search_rate_limit)
-def search_endpoint(
+def search_endpoint(  # NOSONAR -- FastAPI parameters define the public query contract.
     request: Request,
     q: str = Query(default="", max_length=200),
     year: int | None = None,

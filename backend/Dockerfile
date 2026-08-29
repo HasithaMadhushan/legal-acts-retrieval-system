@@ -50,8 +50,8 @@ COPY requirements.txt .
 COPY THIRD_PARTY_NOTICES.md /licenses/THIRD_PARTY_NOTICES.md
 COPY licenses/Apache-2.0.txt /licenses/Apache-2.0.txt
 RUN test -s /licenses/THIRD_PARTY_NOTICES.md \
-    && test -s /licenses/Apache-2.0.txt
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+    && test -s /licenses/Apache-2.0.txt \
+    && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
     torch==2.13.0+cpu torchvision==0.28.0+cpu
 RUN pip install --no-cache-dir -r requirements.txt
 

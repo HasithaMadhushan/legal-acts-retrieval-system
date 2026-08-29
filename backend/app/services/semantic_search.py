@@ -58,7 +58,7 @@ def postgres_nearest_neighbour_query(
     distance = cosine_distance_expression(query_vector)
     return (
         section_query.add_columns(distance.label("distance"))
-        .order_by(distance.asc(), ActSection.id.asc())
+        .order_by(distance.asc())
         .limit(limit)
         .offset(offset)
     )

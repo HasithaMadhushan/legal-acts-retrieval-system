@@ -46,7 +46,7 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: legal_acts
-          POSTGRES_PASSWORD: legal_acts
+          POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_DB: legal_acts_test
         ports:
           - 5432:5432
@@ -59,8 +59,8 @@ jobs:
       run:
         working-directory: backend
     env:
-      DATABASE_URL: postgresql+psycopg://legal_acts:legal_acts@127.0.0.1:5432/legal_acts_test
-      PGVECTOR_TEST_DATABASE_URL: postgresql+psycopg://legal_acts:legal_acts@127.0.0.1:5432/legal_acts_test
+      DATABASE_URL: postgresql+psycopg://legal_acts@127.0.0.1:5432/legal_acts_test
+      PGVECTOR_TEST_DATABASE_URL: postgresql+psycopg://legal_acts@127.0.0.1:5432/legal_acts_test
       ENVIRONMENT: test
       SECRET_KEY: pgvector-ci-secret
       EMBEDDING_PROVIDER: hash-test
@@ -77,7 +77,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install --only-binary :all: -r requirements.txt
 
       - name: Upgrade empty PostgreSQL database
         run: alembic upgrade head
