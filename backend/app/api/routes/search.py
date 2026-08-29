@@ -25,7 +25,6 @@ router = APIRouter(prefix="/search", tags=["search"])
 
 @router.get(
     "",
-    response_model=SearchResponse,
     responses={
         400: {"description": SEMANTIC_SEARCH_DISABLED},
         503: {"description": SEMANTIC_SEARCH_NOT_READY},
