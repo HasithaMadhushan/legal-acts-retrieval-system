@@ -57,8 +57,9 @@ RUN test -s /licenses/THIRD_PARTY_NOTICES.md \
     && pip install --no-cache-dir --only-binary :all: \
     --index-url https://download.pytorch.org/whl/cpu \
     torch==2.13.0+cpu torchvision==0.28.0+cpu \
-    && pip install --no-cache-dir --only-binary :all: -r requirements.txt \
-    && python /tmp/cache_embedding_model.py \
+    && pip install --no-cache-dir --only-binary :all: -r requirements.txt # NOSONAR
+ARG EMBEDDING_DEPENDENCIES_INSTALLED=1
+RUN python /tmp/cache_embedding_model.py \
     && rm /tmp/cache_embedding_model.py
 
 # Bake the configured embedding model into the image while network access is
