@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Validate backend Dockerfile
+        run: docker build --check -f Dockerfile .
+
       - name: Lint (ruff)
         run: python -m ruff check app alembic
 
