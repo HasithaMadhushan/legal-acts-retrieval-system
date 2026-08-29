@@ -1,46 +1,55 @@
-"""Score keyword vs semantic retrieval on a small query set.
-
-Usage (from backend/):
-  python -m scripts.evaluate_retrieval
-"""
+"""Evaluate keyword, semantic, and hybrid retrieval against source judgments."""
 
 from __future__ import annotations
 
-import json
+import argparse
+import subprocess
 from pathlib import Path
 
-QUERIES = [
-    {"query": "High Court jurisdiction over civil matters", "notes": "paraphrase-friendly"},
-    {"query": "personal data protection", "notes": "keyword overlap expected"},
-    {"query": "amendment of the principal enactment", "notes": "citation language"},
-    {"query": "repeal of paragraph of subsection", "notes": "procedural amendment"},
-    {"query": "right to information", "notes": "Act title paraphrase"},
-]
+from app.core.config import get_settings
+from app.db.session import SessionLocal
+from app.services.retrieval_evaluation import (
+    load_gold_dataset,
+    resolve_gold_queries,
+    run_evaluation,
+    validate_evaluation_environment,
+    write_evaluation_results,
+)
 
 
-def precision_at_k(retrieved_ids: list[str], relevant_ids: set[str], k: int = 5) -> float:
-    top = retrieved_ids[:k]
-    if not top:
-        return 0.0
-    return len([item for item in top if item in relevant_ids]) / min(k, len(top))
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    return parser.parse_args()
 
 
-def mean_reciprocal_rank(retrieved_ids: list[str], relevant_ids: set[str]) -> float:
-    for index, item in enumerate(retrieved_ids, start=1):
-        if item in relevant_ids:
-            return 1.0 / index
-    return 0.0
+def _commit_sha() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
 
 
 def main() -> None:
-    print("Retrieval evaluation harness")
-    print("Enable SEMANTIC_SEARCH_ENABLED only after this script beats keyword search.")
-    print(f"Loaded {len(QUERIES)} probe queries.")
-    print(json.dumps(QUERIES, indent=2))
-    print("Expected section IDs should be filled per corpus before scoring P@5 / MRR.")
-    out = Path("data/retrieval_eval_template.json")
-    out.write_text(json.dumps({"queries": QUERIES, "expected_section_ids": {}}, indent=2))
-    print(f"Wrote {out}")
+    args = _arguments()
+    settings = get_settings()
+    queries = load_gold_dataset(args.dataset)
+    with SessionLocal() as db:
+        validate_evaluation_environment(db, settings, queries)
+        resolved = resolve_gold_queries(db, queries)
+        result = run_evaluation(
+            db,
+            resolved,
+            settings=settings,
+            commit_sha=_commit_sha(),
+            dataset_path=args.dataset,
+        )
+    write_evaluation_results(result, args.output)
+    print(f"Wrote retrieval evaluation to {args.output}")
 
 
 if __name__ == "__main__":

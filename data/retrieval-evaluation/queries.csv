@@ -1,0 +1,44 @@
+query_id,query,query_type,document_identifier,expected_section_path,relevance_grade,annotator,adjudication_status,notes
+LAR-001,Act No. 9 of 2023,exact_act_identifier,01_anti-corruption-act-9-of-2023.pdf,1,2,codex-source-pass-1;codex-source-pass-2,agreed,Short-title section identifies the Act
+LAR-002,section 3 of the Anti-Corruption Act No. 9 of 2023,exact_section_path,01_anti-corruption-act-9-of-2023.pdf,3,2,codex-source-pass-1,agreed,Establishes the Commission
+LAR-003,Who establishes the commission that investigates bribery and corruption?,paraphrased_legal_concept,01_anti-corruption-act-9-of-2023.pdf,3,2,codex-source-pass-1;codex-source-pass-2,agreed,Commission establishment is stated directly
+LAR-004,What can the Director-General do under the anti-corruption law?,ambiguous_plain_language,01_anti-corruption-act-9-of-2023.pdf,18,2,codex-source-pass-1,agreed,Powers and functions of the Director-General
+LAR-005,Anti-Corruption Amendment Act No. 28 of 2023,exact_act_identifier,02_anti-corruption-amendment-act-28-of-2023.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-006,Which amendment substitutes Constitutional Council wording throughout the Anti-Corruption Act?,relationship_amendment_intent,02_anti-corruption-amendment-act-28-of-2023.pdf,2,2,codex-source-pass-1;codex-source-pass-2,agreed,Section 2 and its table make the substitutions
+LAR-007,Personal Data Protection Act No. 9 of 2022,exact_act_identifier,03_personal-data-protection-act-9-of-2022.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-008,personal data breach notification,exact_legal_terminology,03_personal-data-protection-act-9-of-2022.pdf,23,2,codex-source-pass-1;codex-source-pass-2,agreed,Personal data breach duties
+LAR-009,How can someone obtain access to their own personal data?,paraphrased_legal_concept,03_personal-data-protection-act-9-of-2022.pdf,13,2,codex-source-pass-1,agreed,Right of access
+LAR-010,section 24 personal data impact assessment,exact_section_path,03_personal-data-protection-act-9-of-2022.pdf,24,2,codex-source-pass-1,agreed,Impact assessment provision
+LAR-011,Personal Data Protection Amendment Act 22 of 2025,exact_act_identifier,04_personal-data-protection-amendment-act-22-of-2025.pdf,1,2,codex-source-pass-1,agreed,Formatting variation omits No.
+LAR-012,What changed the commencement dates of the Personal Data Protection Act?,relationship_amendment_intent,04_personal-data-protection-amendment-act-22-of-2025.pdf,2,2,codex-source-pass-1;codex-source-pass-2,agreed,Amends section 1 commencement rules
+LAR-013,data protecton amendmnt section 20,spelling_format_variation,04_personal-data-protection-amendment-act-22-of-2025.pdf,7,2,codex-source-pass-1,agreed,Misspelling and omitted punctuation target amendment of principal section 20
+LAR-014,Value Added Tax Amendment Act No. 32 of 2023,exact_act_identifier,05_value-added-tax-amendment-act-32-of-2023.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-015,Which provision amends section 22 of the Value Added Tax Act?,relationship_amendment_intent,05_value-added-tax-amendment-act-32-of-2023.pdf,2,2,codex-source-pass-1,agreed,Amendment of principal section 22
+LAR-016,VAT amendmnt s 83,spelling_format_variation,05_value-added-tax-amendment-act-32-of-2023.pdf,3,2,codex-source-pass-1,agreed,Misspelling and section abbreviation target amendment of section 83
+LAR-017,Inland Revenue Amendment Act No. 14 of 2023,exact_act_identifier,06_inland-revenue-amendment-act-14-of-2023.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-018,Which 2023 Inland Revenue amendment changes the First Schedule?,relationship_amendment_intent,06_inland-revenue-amendment-act-14-of-2023.pdf,2,2,codex-source-pass-1;codex-source-pass-2,agreed,Section 2 amends the First Schedule
+LAR-019,section 2 Inland Revenue Amendment 14/2023,exact_section_path,06_inland-revenue-amendment-act-14-of-2023.pdf,2,2,codex-source-pass-1,agreed,Slash-format Act identifier and exact section
+LAR-020,Elections Special Provisions Act No. 21 of 2023,exact_act_identifier,07_elections-special-provisions-act-21-of-2023.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-021,election result gazette deadline forty two days,exact_legal_terminology,07_elections-special-provisions-act-21-of-2023.pdf,3,2,codex-source-pass-1;codex-source-pass-2,adjudicated,Local-authority election deadline
+LAR-021,election result gazette deadline forty two days,exact_legal_terminology,07_elections-special-provisions-act-21-of-2023.pdf,5,1,codex-source-pass-1;codex-source-pass-2,adjudicated,Parliamentary-election provision is also relevant
+LAR-021,election result gazette deadline forty two days,exact_legal_terminology,07_elections-special-provisions-act-21-of-2023.pdf,7,1,codex-source-pass-1;codex-source-pass-2,adjudicated,Presidential-election provision is also relevant
+LAR-021,election result gazette deadline forty two days,exact_legal_terminology,07_elections-special-provisions-act-21-of-2023.pdf,9,1,codex-source-pass-1;codex-source-pass-2,adjudicated,Provincial-council provision is also relevant
+LAR-022,Which provision increases fines in Local Authorities elections?,relationship_amendment_intent,07_elections-special-provisions-act-21-of-2023.pdf,2,2,codex-source-pass-1,agreed,First Schedule substitutions increase fines
+LAR-023,Civil Procedure Code Amendment Act No. 29 of 2023,exact_act_identifier,08_civil-procedure-code-amendment-act-29-of-2023.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-024,When must the court fix the pre-trial conference date?,paraphrased_legal_concept,08_civil-procedure-code-amendment-act-29-of-2023.pdf,5,2,codex-source-pass-1,agreed,Replacement Chapter XA contains section 79A timing
+LAR-025,pre-trial steps before the pre-trial conference,exact_legal_terminology,08_civil-procedure-code-amendment-act-29-of-2023.pdf,6,2,codex-source-pass-1;codex-source-pass-2,agreed,Insertion of Chapter XB and section 79B
+LAR-026,Code of Criminal Procedure Amendment Act No. 2 of 2022,exact_act_identifier,09_code-of-criminal-procedure-amendment-act-2-of-2022.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-027,Where was new section 195A inserted into criminal procedure law?,relationship_amendment_intent,09_code-of-criminal-procedure-amendment-act-2-of-2022.pdf,3,2,codex-source-pass-1,agreed,Insertion of section 195A
+LAR-028,High Court pre trial conference after indictment,paraphrased_legal_concept,09_code-of-criminal-procedure-amendment-act-2-of-2022.pdf,3,2,codex-source-pass-1,agreed,Inserted section 195A governs the conference
+LAR-029,Right to Information Act No. 12 of 2016,exact_act_identifier,10_right-to-information-act-12-of-2016.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-030,How does a citizen request information from a public authority?,paraphrased_legal_concept,10_right-to-information-act-12-of-2016.pdf,24,2,codex-source-pass-1;codex-source-pass-2,agreed,Procedure for obtaining information
+LAR-031,Where do I appeal after an information request is refused?,ambiguous_plain_language,10_right-to-information-act-12-of-2016.pdf,32,2,codex-source-pass-1,agreed,Appeals to the Commission
+LAR-032,duty to disclose information,exact_legal_terminology,10_right-to-information-act-12-of-2016.pdf,35,2,codex-source-pass-1,agreed,Duty of officers to disclose
+LAR-033,Banking Special Provisions Act No. 17 of 2023,exact_act_identifier,11_banking-special-provisions-act-17-of-2023.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-034,What plan must a licensed bank prepare if its financial position deteriorates?,paraphrased_legal_concept,11_banking-special-provisions-act-17-of-2023.pdf,9,2,codex-source-pass-1,agreed,Licensed-bank recovery plan
+LAR-035,Central Bank resolution plan for a systemically important bank,exact_legal_terminology,11_banking-special-provisions-act-17-of-2023.pdf,11,2,codex-source-pass-1;codex-source-pass-2,agreed,Resolution-plan duty
+LAR-036,Proceeds of Crime Act No. 5 of 2025,exact_act_identifier,12_proceeds-of-crime-act-5-of-2025.pdf,1,2,codex-source-pass-1,agreed,Short-title section
+LAR-037,Is hiding the source or ownership of criminal property an offence?,paraphrased_legal_concept,12_proceeds-of-crime-act-5-of-2025.pdf,6,2,codex-source-pass-1,agreed,Concealment or disguising proceeds of crime
+LAR-038,false claim to prevent judicial freezing,exact_legal_terminology,12_proceeds-of-crime-act-5-of-2025.pdf,12,2,codex-source-pass-1,agreed,False claim concerning judicial freezing
+LAR-039,cooling-off period for returning a defective refrigerator,difficult_negative,10_right-to-information-act-12-of-2016.pdf,,0,codex-source-pass-1;codex-source-pass-2,agreed,No relevant provision in the 12-Act corpus
+LAR-040,maritime salvage reward for rescuing cargo,difficult_negative,12_proceeds-of-crime-act-5-of-2025.pdf,,0,codex-source-pass-1,agreed,No relevant provision in the 12-Act corpus
