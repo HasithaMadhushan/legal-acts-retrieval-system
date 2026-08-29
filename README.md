@@ -8,7 +8,7 @@ Machine-extracted references are labeled and hidden from General Users until ver
 
 - **Ingest:** PDF upload (SHA-256 dedupe, optional metadata) → PDF Inspector native text/selective offline OCR → quality gate → optional Docling → PyMuPDF final fallback → section segmentation → reference extraction → fuzzy mapping with confidence bands.
 - **Verify:** Admin split-view verification of sections and references (verify / reject / link-target), preserved across reprocessing.
-- **Search:** keyword + Postgres full-text with filters; semantic mode planned (pgvector — see `docs/pgvector-and-llm-extraction.md`).
+- **Search:** Keyword, Semantic, and Hybrid section retrieval with exact legal-identifier priority, PostgreSQL pgvector/HNSW, role visibility filters, and readiness gating. Semantic serving remains disabled until the frozen retrieval benchmark passes.
 - **Roles:** Admin (corpus + governance), Lawyer (attorney-verified: workspace, exports, relationship tools), General User (verified content only).
 - **Product features:** attorney verification with proof upload, password reset, reading history ("Continue reading"), saved workspace with CSV/Markdown export.
 - **Evaluation:** gold-reference precision/recall/F1 with confusion breakdown and corpus-wide metrics summary.
@@ -120,7 +120,7 @@ Evaluation is deterministic and rule-based. Admin users add manually verified go
 - OCR is enabled for English scanned Acts in the Docker deployment; Sinhala/Tamil OCR quality is not established.
 - No chatbot and no personalized legal advice generation.
 - Extracted references are labeled and not authoritative until verified by an Admin.
-- Semantic search is not implemented yet (`search_mode=semantic` returns 501); keyword + full-text are the baseline.
+- Semantic infrastructure and API modes are implemented, but `SEMANTIC_SEARCH_ENABLED=false` remains the safe default until the source-grounded gold set, HNSW benchmark, and role-visibility acceptance gates pass. Keyword/full-text remains available during disablement or rollback.
 - PDF extraction quality depends on source quality. A structural and citation-retention gate rejects suspect PDF Inspector/Docling output before the PyMuPDF fallback, but Admin review remains required.
 - Unresolved references require Admin review.
 - Evaluation results must be based on manually verified gold data; do not invent accuracy numbers.
