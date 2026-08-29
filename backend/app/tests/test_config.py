@@ -38,13 +38,17 @@ def test_semantic_dependencies_are_pinned():
 
 def test_docker_image_bakes_configured_embedding_model_for_offline_use():
     dockerfile = (BACKEND_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    cache_script = (BACKEND_ROOT / "scripts" / "cache_embedding_model.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2" in dockerfile
     assert "ARG EMBEDDING_MODEL_REVISION=1110a243fdf4706b3f48f1d95db1a4f5529b4d41" in dockerfile
     assert "ARG HF_HOME=/opt/huggingface" in dockerfile
     assert "ENV HF_HOME=${HF_HOME}" in dockerfile
     assert "ENV HF_HUB_OFFLINE=1" in dockerfile
-    assert "revision=os.environ[\"EMBEDDING_MODEL_REVISION\"]" in dockerfile
+    assert "python /tmp/cache_embedding_model.py" in dockerfile
+    assert "revision=os.environ[\"EMBEDDING_MODEL_REVISION\"]" in cache_script
 
 
 def test_semantic_configuration_defaults_to_real_provider_but_disabled_search():
