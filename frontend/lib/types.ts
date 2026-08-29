@@ -280,6 +280,39 @@ export interface SearchResponse {
   semantic_ready: boolean;
 }
 
+export interface EmbeddingStatusResponse {
+  provider: string;
+  model: string;
+  model_revision: string;
+  dimension: number;
+  semantic_enabled: boolean;
+  semantic_ready: boolean;
+  readiness_reasons: string[];
+  counts: {
+    total: number;
+    ready: number;
+    pending: number;
+    stale: number;
+    failed: number;
+  };
+  index: {
+    dialect: string;
+    vector_extension: boolean;
+    column_dimension: number | null;
+    hnsw_index_present: boolean | null;
+  };
+  latest_embedding_at: string | null;
+  latest_backfill_run: null;
+  failure_samples: Array<{
+    section_id: string;
+    act_id: string;
+    act_title: string;
+    section_path: string | null;
+    error: string;
+  }>;
+  remediation_command: string;
+}
+
 export function describeSearchMode(
   response: Pick<SearchResponse, "requested_mode" | "effective_mode">
 ): string {

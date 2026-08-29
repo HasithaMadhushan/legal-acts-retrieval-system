@@ -65,13 +65,16 @@ describe("search mode metadata", () => {
     expect(lawyerSearchPage).toContain("describeSearchMode");
     expect(lawyerSearchPage).toContain("search_mode");
     expect(lawyerSearchPage).toContain("searchErrorMessage");
+    expect(searchPage).toContain('label: "Hybrid"');
+    expect(searchPage).toContain("Combines exact keyword matches with meaning-based section retrieval");
+    expect(lawyerSearchPage).toContain('if (value === "all") return "Hybrid"');
   });
 
   it("maps unavailable semantic-only errors to stable copy", () => {
     const api = readFileSync("lib/api.ts", "utf8");
     expect(api).toContain("export function searchErrorMessage");
-    expect(api).toContain("Semantic search is not enabled yet. Use Keyword or All methods.");
-    expect(api).toContain("Semantic search is enabled but not ready. Use Keyword or All methods.");
+    expect(api).toContain("Semantic search is not enabled yet. Use Keyword or Hybrid.");
+    expect(api).toContain("Semantic search is enabled but not ready. Use Keyword or Hybrid.");
     expect(api).toContain("status === 400");
     expect(api).toContain("status === 503");
   });

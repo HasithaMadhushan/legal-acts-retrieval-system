@@ -204,7 +204,14 @@ export default function LawyerSearchPage() {
               <SelectField label="Page size" value={limit} onChange={setLimit} options={["10", "25", "50"]} />
             </div>
           </details>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <p className="text-xs text-muted-foreground">
+            {searchMode === "keyword"
+              ? "Keyword uses exact legal terms and identifiers."
+              : searchMode === "semantic"
+                ? "Semantic retrieves sections by meaning and requires a ready embedding corpus."
+                : "Hybrid fuses keyword and semantic ranks when embeddings are ready; otherwise it safely uses keyword."}
+          </p>
+          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           {workspaceMessage ? <p className="text-sm text-muted-foreground">{workspaceMessage}</p> : null}
         </form>
         {response ? (
@@ -283,7 +290,7 @@ function SelectField({
 function formatOption(value: string) {
   if (value === "ANY") return "Any";
   if (value === "DEFAULT") return "Verified + pending";
-  if (value === "all") return "All methods";
+  if (value === "all") return "Hybrid";
   return value.replaceAll("_", " ").toLowerCase().replace(/^./, (character) => character.toUpperCase());
 }
 

@@ -5,6 +5,7 @@ import type {
   LegalReference,
   EvaluationMetricsSummary,
   EvaluationRun,
+  EmbeddingStatusResponse,
   EvaluationRunCreatePayload,
   GoldReference,
   GoldReferenceCreatePayload,
@@ -45,10 +46,10 @@ export class ApiError extends Error {
 
 export function searchErrorMessage(err: unknown): string {
   if (err instanceof ApiError && err.status === 400) {
-    return "Semantic search is not enabled yet. Use Keyword or All methods.";
+    return "Semantic search is not enabled yet. Use Keyword or Hybrid.";
   }
   if (err instanceof ApiError && err.status === 503) {
-    return "Semantic search is enabled but not ready. Use Keyword or All methods.";
+    return "Semantic search is enabled but not ready. Use Keyword or Hybrid.";
   }
   if (err instanceof ApiError && err.status === 401) {
     return "Session expired — sign in again";
@@ -359,6 +360,10 @@ export async function runEvaluation(payload: EvaluationRunCreatePayload) {
 
 export async function listEvaluationRuns() {
   return apiFetch<EvaluationRun[]>("/evaluation/runs");
+}
+
+export async function getEmbeddingStatus() {
+  return apiFetch<EmbeddingStatusResponse>("/embeddings/status");
 }
 
 export async function listUsers() {

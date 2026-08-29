@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   createGoldReference,
+  getEmbeddingStatus,
   getEvaluationMetricsSummary,
   listEvaluationRuns,
   listGoldReferences,
@@ -12,6 +13,7 @@ import type {
   EvaluationMetricsSummary,
   EvaluationMismatch,
   EvaluationRun,
+  EmbeddingStatusResponse,
   GoldReference
 } from "@/lib/types";
 import { RoleGuard } from "@/components/role-guard";
@@ -30,6 +32,7 @@ import {
 
 export default function AdminEvaluationPage() {
   const [metrics, setMetrics] = useState<EvaluationMetricsSummary | null>(null);
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatusResponse | null>(null);
   const [goldReferences, setGoldReferences] = useState<GoldReference[]>([]);
   const [runs, setRuns] = useState<EvaluationRun[]>([]);
   const [currentRun, setCurrentRun] = useState<EvaluationRun | null>(null);
@@ -51,15 +54,17 @@ export default function AdminEvaluationPage() {
     setLoading(true);
     setError("");
     try {
-      const [metricsData, goldData, runData] = await Promise.all([
+      const [metricsData, goldData, runData, embeddingData] = await Promise.all([
         getEvaluationMetricsSummary(),
         listGoldReferences(),
-        listEvaluationRuns()
+        listEvaluationRuns(),
+        getEmbeddingStatus()
       ]);
       setMetrics(metricsData);
       setGoldReferences(goldData);
       setRuns(runData);
       setCurrentRun(runData[0] ?? null);
+      setEmbeddingStatus(embeddingData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load evaluation dashboard.");
     } finally {
@@ -119,6 +124,7 @@ export default function AdminEvaluationPage() {
           {message ? <p className="mt-3 text-sm text-muted-foreground">{message}</p> : null}
         </section>
 
+        {embeddingStatus ? <EmbeddingReadiness status={embeddingStatus} /> : null}
         {currentRun ? <LatestRunSummary run={currentRun} /> : null}
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -222,6 +228,69 @@ export default function AdminEvaluationPage() {
         </div>
       </div>
     </RoleGuard>
+  );
+}
+
+function EmbeddingReadiness({ status }: Readonly<{ status: EmbeddingStatusResponse }>) {
+  const cards = [
+    ["Ready", status.counts.ready],
+    ["Pending", status.counts.pending],
+    ["Stale", status.counts.stale],
+    ["Failed", status.counts.failed]
+  ] as const;
+  const indexLabel =
+    status.index.hnsw_index_present === null
+      ? "unknown"
+      : status.index.hnsw_index_present
+        ? "present"
+        : "missing";
+  return (
+    <Card className="rounded-lg">
+      <CardContent className="space-y-4 p-5">
+        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+          <div>
+            <h2 className="font-serif text-lg font-semibold">Semantic embedding readiness</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {status.provider} · {status.model} · {status.dimension} dimensions
+            </p>
+          </div>
+          <StatusBadge value={status.semantic_ready ? "READY" : "NOT READY"} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {cards.map(([label, value]) => (
+            <div key={label} className="rounded-md border bg-[#fffdf8] p-3">
+              <p className="font-serif text-2xl font-semibold">{value}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Serving {status.semantic_enabled ? "enabled" : "disabled"} · vector extension {status.index.vector_extension ? "present" : "missing"} · HNSW {indexLabel}
+        </p>
+        {status.readiness_reasons.length ? (
+          <ul className="list-disc space-y-1 pl-5 text-sm text-amber-800">
+            {status.readiness_reasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        ) : null}
+        {status.failure_samples.length ? (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold">Recent failures</p>
+            {status.failure_samples.map((failure) => (
+              <div key={failure.section_id} className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{failure.act_title} · section {failure.section_path ?? "unknown"}</p>
+                <p className="text-muted-foreground">{failure.error}</p>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <code className="block overflow-x-auto rounded-md bg-muted p-3 text-xs">
+          {status.remediation_command}
+        </code>
+        <p className="text-xs text-muted-foreground">
+          Backfill-run history is not persisted yet; latest embedded section: {status.latest_embedding_at ?? "none"}.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
